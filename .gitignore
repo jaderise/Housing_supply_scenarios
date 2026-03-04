@@ -1,8 +1,9 @@
 # Data files
+# raw/ is large and intermediate — fetched by CI, uploaded as artifact
 data/raw/
-data/processed/
-data/db/
+# logs are ephemeral
 data/logs/
+# processed CSVs and the SQLite DB are tracked (required by the API server at runtime)
 
 # Environment
 .env

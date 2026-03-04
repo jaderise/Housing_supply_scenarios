@@ -1,0 +1,150 @@
+name: Validate Pipeline
+
+# Runs on every push and pull request.
+# Uses the seed data generator (no API keys needed) to validate that the
+# full transform → load → calculate pipeline executes without errors.
+
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "pipeline/**"
+      - "requirements.txt"
+      - ".github/workflows/validate_pipeline.yml"
+  pull_request:
+    paths:
+      - "pipeline/**"
+      - "requirements.txt"
+      - ".github/workflows/validate_pipeline.yml"
+
+jobs:
+  validate:
+    name: Validate pipeline (seed data)
+    runs-on: ubuntu-latest
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # -----------------------------------------------------------------------
+      # 2. Python setup
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # -----------------------------------------------------------------------
+      # 3. Minimal .env (no real API keys needed — seed data bypasses fetch)
+      # -----------------------------------------------------------------------
+      - name: Create stub .env
+        run: |
+          cat > .env <<EOF
+          FRED_API_KEY=stub
+          CENSUS_API_KEY=stub
+          HUD_API_KEY=stub
+          DB_PATH=./data/db/housing.db
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 4. Generate seed data
+      # -----------------------------------------------------------------------
+      - name: Generate seed data
+        run: python -m pipeline.seed_data
+
+      # -----------------------------------------------------------------------
+      # 5. Run pipeline stages
+      # -----------------------------------------------------------------------
+      - name: Transform
+        run: python -m pipeline.run_pipeline --stage transform
+
+      - name: Load
+        run: python -m pipeline.run_pipeline --stage load
+
+      - name: Calculate
+        run: python -m pipeline.run_pipeline --stage calculate
+
+      # -----------------------------------------------------------------------
+      # 6. Smoke-test the DB
+      # -----------------------------------------------------------------------
+      - name: Smoke test DB
+        run: |
+          python - <<'PY'
+          import sqlite3, sys
+
+          REQUIRED_TABLES = {
+              "cbsa_reference": 50,
+              "permits": 1,
+              "population": 1,
+              "housing_stock": 1,
+              "vacancy": 1,
+              "fair_market_rents": 1,
+              "fred_series": 1,
+              "metrics_metro_annual": 1,
+              "metrics_national_annual": 1,
+              "scenario_grid": 1,
+              "scenario_grid_national": 1,
+          }
+
+          conn = sqlite3.connect("data/db/housing.db")
+          cur = conn.cursor()
+          cur.execute("SELECT name FROM sqlite_master WHERE type='table'")
+          present = {r[0] for r in cur.fetchall()}
+
+          errors = []
+          for table, min_rows in REQUIRED_TABLES.items():
+              if table not in present:
+                  errors.append(f"MISSING table: {table}")
+                  continue
+              cur.execute(f"SELECT COUNT(*) FROM {table}")
+              n = cur.fetchone()[0]
+              if n < min_rows:
+                  errors.append(f"{table}: expected >= {min_rows} rows, got {n}")
+
+          conn.close()
+
+          if errors:
+              print("SMOKE TEST FAILED:")
+              for e in errors:
+                  print(f"  - {e}")
+              sys.exit(1)
+          else:
+              print(f"Smoke test passed — {len(REQUIRED_TABLES)} tables verified.")
+          PY
+
+      # -----------------------------------------------------------------------
+      # 7. Summary
+      # -----------------------------------------------------------------------
+      - name: Print summary
+        if: always()
+        run: |
+          echo "## Validation summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f data/db/housing.db ]; then
+            python - <<'PY'
+          import sqlite3, os
+          conn = sqlite3.connect("data/db/housing.db")
+          cur = conn.cursor()
+          cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+          tables = cur.fetchall()
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              f.write("| Table | Rows |\n")
+              f.write("|-------|------|\n")
+              for (t,) in tables:
+                  if t == "sqlite_sequence":
+                      continue
+                  cur.execute(f"SELECT COUNT(*) FROM {t}")
+                  n = cur.fetchone()[0]
+                  f.write(f"| `{t}` | {n:,} |\n")
+          conn.close()
+          PY
+          else
+            echo "DB not found — pipeline likely failed." >> "$GITHUB_STEP_SUMMARY"
+          fi

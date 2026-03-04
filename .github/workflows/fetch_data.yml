@@ -1,0 +1,184 @@
+name: Fetch & Rebuild Data
+
+# Runs on the 1st of every month at 06:00 UTC, or manually via the Actions UI.
+# Fetches all 6 data sources, runs the full pipeline, then commits the
+# processed CSVs and SQLite DB back to the triggering branch.
+# Raw CSV downloads are uploaded as a workflow artifact (90-day retention).
+
+on:
+  schedule:
+    - cron: "0 6 1 * *"   # Monthly: 1st of month at 06:00 UTC
+  workflow_dispatch:
+    inputs:
+      stage:
+        description: "Pipeline stage to start from"
+        required: false
+        default: "fetch"
+        type: choice
+        options:
+          - fetch           # full run (fetch → transform → load → calculate)
+          - transform       # skip fetch, re-process existing raw data
+          - load            # skip fetch+transform
+          - calculate       # only recalculate scenarios
+
+jobs:
+  fetch-and-build:
+    name: Fetch data & rebuild DB
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write       # needed to push committed data back
+
+    steps:
+      # -----------------------------------------------------------------------
+      # 1. Checkout
+      # -----------------------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          # Use PAT if you need to trigger downstream workflows on the push;
+          # GITHUB_TOKEN is sufficient otherwise.
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      # -----------------------------------------------------------------------
+      # 2. Python setup
+      # -----------------------------------------------------------------------
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # -----------------------------------------------------------------------
+      # 3. Write .env from repository secrets
+      # -----------------------------------------------------------------------
+      - name: Create .env file
+        run: |
+          cat > .env <<EOF
+          FRED_API_KEY=${{ secrets.FRED_API_KEY }}
+          CENSUS_API_KEY=${{ secrets.CENSUS_API_KEY }}
+          HUD_API_KEY=${{ secrets.HUD_API_KEY }}
+          DB_PATH=./data/db/housing.db
+          EOF
+
+      # -----------------------------------------------------------------------
+      # 4. Restore cached raw data (speeds up reruns that skip fetch)
+      # -----------------------------------------------------------------------
+      - name: Restore raw data cache
+        if: ${{ github.event.inputs.stage != 'fetch' && github.event.inputs.stage != '' }}
+        uses: actions/cache/restore@v4
+        with:
+          path: data/raw
+          key: raw-data-${{ github.ref_name }}-${{ github.run_id }}
+          restore-keys: |
+            raw-data-${{ github.ref_name }}-
+
+      # -----------------------------------------------------------------------
+      # 5. Determine start stage (default: fetch for scheduled runs)
+      # -----------------------------------------------------------------------
+      - name: Set pipeline start stage
+        id: stage
+        run: |
+          START="${{ github.event.inputs.stage }}"
+          echo "start=${START:-fetch}" >> "$GITHUB_OUTPUT"
+
+      # -----------------------------------------------------------------------
+      # 6. Run pipeline
+      # -----------------------------------------------------------------------
+      - name: Run pipeline — fetch
+        if: steps.stage.outputs.start == 'fetch'
+        run: python -m pipeline.run_pipeline --stage fetch
+
+      - name: Run pipeline — transform
+        if: >
+          steps.stage.outputs.start == 'fetch' ||
+          steps.stage.outputs.start == 'transform'
+        run: python -m pipeline.run_pipeline --stage transform
+
+      - name: Run pipeline — load
+        if: >
+          steps.stage.outputs.start == 'fetch' ||
+          steps.stage.outputs.start == 'transform' ||
+          steps.stage.outputs.start == 'load'
+        run: python -m pipeline.run_pipeline --stage load
+
+      - name: Run pipeline — calculate
+        run: python -m pipeline.run_pipeline --stage calculate
+
+      # -----------------------------------------------------------------------
+      # 7. Upload raw CSVs as artifact (large; not committed to repo)
+      # -----------------------------------------------------------------------
+      - name: Upload raw data artifact
+        if: steps.stage.outputs.start == 'fetch'
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-data-${{ github.run_id }}
+          path: data/raw/
+          retention-days: 90
+          compression-level: 6
+
+      # -----------------------------------------------------------------------
+      # 8. Cache raw data for subsequent reruns
+      # -----------------------------------------------------------------------
+      - name: Cache raw data
+        if: steps.stage.outputs.start == 'fetch'
+        uses: actions/cache/save@v4
+        with:
+          path: data/raw
+          key: raw-data-${{ github.ref_name }}-${{ github.run_id }}
+
+      # -----------------------------------------------------------------------
+      # 9. Commit processed data + DB back to the branch
+      # -----------------------------------------------------------------------
+      - name: Commit updated data
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          # Stage processed CSVs and the SQLite DB (no longer gitignored)
+          git add data/processed/ data/db/
+
+          if git diff --cached --quiet; then
+            echo "No data changes to commit — skipping."
+          else
+            TIMESTAMP=$(date -u "+%Y-%m-%d %H:%M UTC")
+            git commit -m "chore(data): refresh pipeline output [${TIMESTAMP}]
+
+          Triggered by: ${{ github.event_name }}
+          Run: ${{ github.run_id }}
+          Start stage: ${{ steps.stage.outputs.start }}"
+
+            git push origin HEAD:${{ github.ref_name }}
+          fi
+
+      # -----------------------------------------------------------------------
+      # 10. Summary
+      # -----------------------------------------------------------------------
+      - name: Print summary
+        if: always()
+        run: |
+          echo "## Pipeline run summary" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Item | Value |" >> "$GITHUB_STEP_SUMMARY"
+          echo "|------|-------|" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Start stage | ${{ steps.stage.outputs.start }} |" >> "$GITHUB_STEP_SUMMARY"
+          echo "| Triggered by | ${{ github.event_name }} |" >> "$GITHUB_STEP_SUMMARY"
+          if [ -f data/db/housing.db ]; then
+            SIZE=$(du -sh data/db/housing.db | cut -f1)
+            echo "| DB size | ${SIZE} |" >> "$GITHUB_STEP_SUMMARY"
+            python - <<'PY'
+          import sqlite3, os
+          conn = sqlite3.connect("data/db/housing.db")
+          cur = conn.cursor()
+          cur.execute("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+          tables = cur.fetchall()
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as f:
+              for (t,) in tables:
+                  cur.execute(f"SELECT COUNT(*) FROM {t}")
+                  n = cur.fetchone()[0]
+                  f.write(f"| `{t}` rows | {n:,} |\n")
+          conn.close()
+          PY
+          fi
