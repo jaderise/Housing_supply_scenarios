@@ -85,6 +85,7 @@ def run(config: dict = None) -> dict:
     target_cbsas = set(get_cbsa_codes())
 
     files_written = 0
+    files_existing = 0
     total_rows = 0
 
     # PEP vintages available: 2010-2023 (adjust as newer vintages become available)
@@ -92,6 +93,7 @@ def run(config: dict = None) -> dict:
         out_path = os.path.join(raw_dir, f"census_population_metro_{vintage}.csv")
         if os.path.exists(out_path):
             logger.info(f"Skipping vintage {vintage}, file exists")
+            files_existing += 1
             continue
 
         try:
@@ -116,7 +118,7 @@ def run(config: dict = None) -> dict:
 
     return {
         "source": "census_population",
-        "status": "SUCCESS" if files_written > 0 else "FAILED",
+        "status": "SUCCESS" if (files_written + files_existing) > 0 else "FAILED",
         "files_written": files_written,
         "rows_fetched": total_rows,
     }

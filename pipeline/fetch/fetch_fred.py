@@ -84,10 +84,16 @@ def run(config: dict = None) -> dict:
         return {"source": "fred", "status": "FAILED", "files_written": 0, "rows_fetched": 0}
 
     files_written = 0
+    files_existing = 0
     total_rows = 0
 
     for series_id in SERIES:
         out_path = os.path.join(raw_dir, f"fred_{series_id}.csv")
+
+        if os.path.exists(out_path):
+            logger.info(f"Skipping {series_id}, file exists")
+            files_existing += 1
+            continue
 
         try:
             df = fetch_series(series_id, api_key)
@@ -111,7 +117,7 @@ def run(config: dict = None) -> dict:
 
     return {
         "source": "fred",
-        "status": "SUCCESS" if files_written == len(SERIES) else "PARTIAL",
+        "status": "SUCCESS" if (files_written + files_existing) == len(SERIES) else "PARTIAL",
         "files_written": files_written,
         "rows_fetched": total_rows,
     }

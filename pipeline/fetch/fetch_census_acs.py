@@ -93,6 +93,7 @@ def run(config: dict = None) -> dict:
     target_cbsas = set(get_cbsa_codes())
 
     files_written = 0
+    files_existing = 0
     total_rows = 0
 
     # ACS 1-year available from 2005, skip 2020 (not released)
@@ -104,6 +105,7 @@ def run(config: dict = None) -> dict:
         out_path = os.path.join(raw_dir, f"census_acs_metro_{year}.csv")
         if os.path.exists(out_path):
             logger.info(f"Skipping {year}, file exists")
+            files_existing += 1
             continue
 
         try:
@@ -139,7 +141,7 @@ def run(config: dict = None) -> dict:
 
     return {
         "source": "census_acs",
-        "status": "SUCCESS" if files_written > 0 else "FAILED",
+        "status": "SUCCESS" if (files_written + files_existing) > 0 else "FAILED",
         "files_written": files_written,
         "rows_fetched": total_rows,
     }
