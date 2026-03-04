@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback } from 'react';
 
-const API_BASE = process.env.REACT_APP_API_URL || 'http://localhost:8000';
+const API_BASE = process.env.REACT_APP_API_URL || '';
 
 export function useApi(endpoint, dependencies = []) {
   const [data, setData] = useState(null);
@@ -33,7 +33,7 @@ export function useApi(endpoint, dependencies = []) {
       });
 
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+  // eslint-disable-next-line
   }, [endpoint, ...dependencies]);
 
   return { data, loading, error };
