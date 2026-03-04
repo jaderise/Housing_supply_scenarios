@@ -5,7 +5,11 @@ from pathlib import Path
 
 import pandas as pd
 import yaml
+from dotenv import load_dotenv
 
+# Load .env from project root
+_project_root = Path(__file__).parent.parent.parent
+load_dotenv(_project_root / ".env")
 
 CONFIG_DIR = Path(__file__).parent.parent / "config"
 
@@ -37,7 +41,7 @@ def load_pipeline_config() -> dict:
         raw = f.read()
 
     # Substitute environment variables
-    for key in ("CENSUS_API_KEY", "FRED_API_KEY"):
+    for key in ("CENSUS_API_KEY", "FRED_API_KEY", "HUD_API_KEY"):
         raw = raw.replace(f"${{{key}}}", os.environ.get(key, ""))
 
     return yaml.safe_load(raw)

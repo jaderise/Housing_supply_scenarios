@@ -63,7 +63,7 @@ def _calculate(conn, params, calc_config):
         current_deficit = latest.get("cumulative_deficit_since_2008", 0)
         if pd.isna(current_deficit):
             current_deficit = 0
-        current_deficit = int(current_deficit)
+        current_deficit = int(float(current_deficit))
 
         # Population trend (linear extrapolation of last 3 years)
         cbsa_pop = population[population["cbsa_code"] == cbsa_code].sort_values("year")
@@ -134,7 +134,7 @@ def _calculate(conn, params, calc_config):
                 projected_deficit += yr_net
                 projected_comp += yr_completions
 
-            projected_surplus_deficit = int(projected_comp - projected_hh - current_stock * demo_rate * horizon)
+            projected_surplus_deficit = int(float(projected_comp) - float(projected_hh) - float(current_stock) * demo_rate * horizon)
 
             scenario_label = (
                 f"{params['hh_formation'][hh_level]['label']} | "
@@ -149,11 +149,11 @@ def _calculate(conn, params, calc_config):
                 "demolition_assumption": demo_level,
                 "migration_assumption": mig_level,
                 "horizon_years": horizon,
-                "projected_new_households": int(projected_hh),
-                "projected_completions": int(projected_comp),
+                "projected_new_households": int(float(projected_hh)),
+                "projected_completions": int(float(projected_comp)),
                 "projected_surplus_deficit": projected_surplus_deficit,
                 "current_deficit_baseline": current_deficit,
-                "end_state_deficit": int(projected_deficit),
+                "end_state_deficit": int(float(projected_deficit)),
                 "scenario_label": scenario_label,
             })
 
@@ -166,7 +166,7 @@ def _calculate(conn, params, calc_config):
     national_rows = []
     if not national.empty:
         nat_latest = national.sort_values("year").iloc[-1]
-        nat_deficit = int(nat_latest.get("cumulative_deficit_since_2008", 0) or 0)
+        nat_deficit = int(float(nat_latest.get("cumulative_deficit_since_2008", 0) or 0))
         nat_hh_trend = national.tail(3)["hh_formation_rate"].mean()
         if pd.isna(nat_hh_trend):
             nat_hh_trend = 0
@@ -183,9 +183,9 @@ def _calculate(conn, params, calc_config):
             hh_adj = params["hh_formation"][hh_level]["adjustment"]
             demo_rate = params["demolition"][demo_level]["rate"]
 
-            proj_hh = nat_hh_trend * hh_adj * horizon
-            proj_comp = nat_comp_trend * horizon
-            proj_demo = current_nat_stock * demo_rate * horizon
+            proj_hh = float(nat_hh_trend) * hh_adj * horizon
+            proj_comp = float(nat_comp_trend) * horizon
+            proj_demo = float(current_nat_stock) * demo_rate * horizon
             proj_surplus = int(proj_comp - proj_hh - proj_demo)
             end_deficit = int(nat_deficit + proj_surplus)
 
@@ -200,8 +200,8 @@ def _calculate(conn, params, calc_config):
                 "demolition_assumption": demo_level,
                 "migration_assumption": "flat",
                 "horizon_years": horizon,
-                "projected_new_households": int(proj_hh),
-                "projected_completions": int(proj_comp),
+                "projected_new_households": int(float(proj_hh)),
+                "projected_completions": int(float(proj_comp)),
                 "projected_surplus_deficit": proj_surplus,
                 "current_deficit_baseline": nat_deficit,
                 "end_state_deficit": end_deficit,

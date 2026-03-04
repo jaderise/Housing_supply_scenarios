@@ -7,6 +7,7 @@ data_paths:
 fetch:
   census_api_key: ${CENSUS_API_KEY}
   fred_api_key: ${FRED_API_KEY}
+  hud_api_key: ${HUD_API_KEY}
   start_year: 2000
   end_year: 2024
   request_delay_seconds: 0.5
