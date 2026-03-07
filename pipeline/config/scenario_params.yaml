@@ -1,0 +1,48 @@
+hh_formation:
+  low:
+    label: "Low (-10% vs. trend)"
+    adjustment: 0.90
+    description: "Formation rate 10% below the 2010-2019 average annual rate"
+  baseline:
+    label: "Baseline (2010-2019 trend)"
+    adjustment: 1.00
+    description: "2010-2019 average annual rate (pre-pandemic trend)"
+  high:
+    label: "High (+10% vs. trend)"
+    adjustment: 1.10
+    description: "Formation rate 10% above the 2010-2019 average (pent-up demand release)"
+
+demolition:
+  low:
+    label: "Low (0.15%/yr)"
+    rate: 0.0015
+    description: "Lower end of academic estimates"
+  baseline:
+    label: "Baseline (0.25%/yr)"
+    rate: 0.0025
+    description: "Commonly used industry estimate; consistent with Freddie Mac methodology"
+  high:
+    label: "High (0.35%/yr)"
+    rate: 0.0035
+    description: "Upper bound; reflects aging Sun Belt stock and climate risk"
+
+migration:
+  reverting:
+    label: "Reverting (normalize to pre-2020)"
+    adjustment: 0.50
+    description: "Net domestic migration returns to 2015-2019 trend rate"
+  flat:
+    label: "Flat (stay at recent levels)"
+    adjustment: 1.00
+    description: "Migration stays at 2022-2023 actual levels"
+  continuing:
+    label: "Continuing (maintain pandemic pace)"
+    adjustment: 1.25
+    description: "Migration remains elevated at pandemic peak rate"
+
+horizon:
+  values: [1, 2, 3]
+  labels:
+    1: "1 Year"
+    2: "2 Years"
+    3: "3 Years"

@@ -1,0 +1,51 @@
+cbsa_code,cbsa_name,principal_city,states,population_rank,region,sun_belt
+35620,New York-Newark-Jersey City,New York,NY-NJ-PA,1,Northeast,0
+31080,Los Angeles-Long Beach-Anaheim,Los Angeles,CA,2,West,0
+16980,Chicago-Naperville-Elgin,Chicago,IL-IN-WI,3,Midwest,0
+19100,Dallas-Fort Worth-Arlington,Dallas,TX,4,South,1
+26420,Houston-The Woodlands-Sugar Land,Houston,TX,5,South,1
+47900,Washington-Arlington-Alexandria,Washington,DC-VA-MD-WV,6,South,0
+33100,Miami-Fort Lauderdale-Pompano Beach,Miami,FL,7,South,0
+37980,Philadelphia-Camden-Wilmington,Philadelphia,PA-NJ-DE-MD,8,Northeast,0
+12060,Atlanta-Sandy Springs-Alpharetta,Atlanta,GA,9,South,1
+14460,Boston-Cambridge-Newton,Boston,MA-NH,10,Northeast,0
+38060,Phoenix-Mesa-Chandler,Phoenix,AZ,11,West,1
+40140,Riverside-San Bernardino-Ontario,Riverside,CA,12,West,1
+41860,San Francisco-Oakland-Berkeley,San Francisco,CA,13,West,0
+42660,Seattle-Tacoma-Bellevue,Seattle,WA,14,West,0
+33460,Minneapolis-St. Paul-Bloomington,Minneapolis,MN-WI,15,Midwest,0
+41740,San Diego-Chula Vista-Carlsbad,San Diego,CA,16,West,0
+45300,Tampa-St. Petersburg-Clearwater,Tampa,FL,17,South,1
+19740,Denver-Aurora-Lakewood,Denver,CO,18,West,1
+41700,San Antonio-New Braunfels,San Antonio,TX,19,South,1
+38900,Portland-Vancouver-Hillsboro,Portland,OR-WA,20,West,0
+36740,Orlando-Kissimmee-Sanford,Orlando,FL,21,South,1
+40900,Sacramento-Roseville-Folsom,Sacramento,CA,22,West,1
+38300,Pittsburgh,Pittsburgh,PA,23,Northeast,0
+12420,Austin-Round Rock-Georgetown,Austin,TX,24,South,1
+17460,Cincinnati,Cincinnati,OH-KY-IN,25,Midwest,0
+16740,Charlotte-Concord-Gastonia,Charlotte,NC-SC,26,South,1
+29820,Las Vegas-Henderson-Paradise,Las Vegas,NV,27,West,1
+34980,Nashville-Davidson-Murfreesboro-Franklin,Nashville,TN,28,South,1
+26900,Indianapolis-Carmel-Anderson,Indianapolis,IN,29,Midwest,0
+41180,San Jose-Sunnyvale-Santa Clara,San Jose,CA,30,West,0
+27260,Jacksonville,Jacksonville,FL,31,South,1
+18140,Columbus,Columbus,OH,32,Midwest,0
+47260,Virginia Beach-Norfolk-Newport News,Virginia Beach,VA-NC,33,South,0
+14860,Bridgeport-Stamford-Norwalk,Bridgeport,CT,34,Northeast,0
+39580,Raleigh-Cary,Raleigh,NC,35,South,1
+13820,Birmingham-Hoover,Birmingham,AL,36,South,0
+36420,Oklahoma City,Oklahoma City,OK,37,South,0
+33340,Milwaukee-Waukesha,Milwaukee,WI,38,Midwest,0
+40060,Richmond,Richmond,VA,39,South,0
+28140,Kansas City,Kansas City,MO-KS,40,Midwest,0
+35380,New Orleans-Metairie,New Orleans,LA,41,South,0
+31140,Louisville/Jefferson County,Louisville,KY-IN,42,South,0
+41620,Salt Lake City,Salt Lake City,UT,43,West,0
+39300,Providence-Warwick,Providence,RI-MA,44,Northeast,0
+32820,Memphis,Memphis,TN-MS-AR,45,South,0
+25540,Hartford-East Hartford-Middletown,Hartford,CT,46,Northeast,0
+15380,Buffalo-Cheektowaga,Buffalo,NY,47,Northeast,0
+40380,Rochester,Rochester,NY,48,Northeast,0
+24340,Grand Rapids-Kentwood,Grand Rapids,MI,49,Midwest,0
+46060,Tucson,Tucson,AZ,50,West,0

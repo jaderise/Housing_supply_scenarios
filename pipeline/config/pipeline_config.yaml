@@ -1,0 +1,53 @@
+data_paths:
+  raw: ./data/raw
+  processed: ./data/processed
+  db: ./data/db/housing.db
+  logs: ./data/logs
+
+fetch:
+  census_api_key: ${CENSUS_API_KEY}
+  fred_api_key: ${FRED_API_KEY}
+  hud_api_key: ${HUD_API_KEY}
+  start_year: 2000
+  end_year: 2024
+  request_delay_seconds: 0.5
+  max_retries: 3
+
+transform:
+  include_nostat_in_vacancy: false
+  population_vintage_preference: latest
+
+calculate:
+  baseline_start_year: 2008
+  demolition_rates:
+    low: 0.0015
+    baseline: 0.0025
+    high: 0.0035
+  hh_formation_adjustments:
+    low: 0.90
+    baseline: 1.00
+    high: 1.10
+  migration_adjustments:
+    reverting: 0.50
+    flat: 1.00
+    continuing: 1.25
+  horizon_years: [1, 2, 3]
+  mortgage_down_payment_pct: 0.20
+
+sun_belt_cbsas:
+  - "38060"  # Phoenix
+  - "12420"  # Austin
+  - "19100"  # Dallas-Fort Worth
+  - "26420"  # Houston
+  - "41700"  # San Antonio
+  - "45300"  # Tampa
+  - "36740"  # Orlando
+  - "27260"  # Jacksonville
+  - "16740"  # Charlotte
+  - "39580"  # Raleigh
+  - "34980"  # Nashville
+  - "12060"  # Atlanta
+  - "29820"  # Las Vegas
+  - "40140"  # Riverside-San Bernardino
+  - "40900"  # Sacramento
+  - "19740"  # Denver
