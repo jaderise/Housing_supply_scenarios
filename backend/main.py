@@ -4,6 +4,7 @@ import os
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from backend.db import get_db
@@ -84,6 +85,15 @@ def get_metadata():
         "latest_data_year": dict(latest_year)["max_year"] if latest_year else None,
         "total_metros": dict(total)["cnt"] if total else 0,
     }
+
+
+@app.get("/download/project.zip")
+async def download_project():
+    """Download the full project as a zip file."""
+    zip_path = os.path.join(os.path.dirname(__file__), "..", "Housing_supply_scenarios.zip")
+    if os.path.isfile(zip_path):
+        return FileResponse(zip_path, media_type="application/zip", filename="Housing_supply_scenarios.zip")
+    return {"error": "Zip file not found. Please regenerate it."}
 
 
 # Serve React frontend build if available
