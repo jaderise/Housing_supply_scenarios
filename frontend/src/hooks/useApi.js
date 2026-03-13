@@ -54,7 +54,11 @@ export function useStreamingApi() {
         body: JSON.stringify(body),
       });
 
-      if (!res.ok) throw new Error(`API error: ${res.status}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => null);
+        const detail = errBody?.detail || `API error: ${res.status}`;
+        throw new Error(detail);
+      }
 
       const reader = res.body.getReader();
       const decoder = new TextDecoder();

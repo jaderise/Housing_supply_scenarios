@@ -112,6 +112,75 @@ def get_metro_latest(cbsa_code: str):
     }
 
 
+@router.get("/{cbsa_code}/trends")
+def get_metro_trends(cbsa_code: str):
+    """Return historical trend data for sparklines on the scenario builder sliders."""
+    with get_db() as conn:
+        ref = conn.execute(
+            "SELECT cbsa_name FROM cbsa_reference WHERE cbsa_code = ?", (cbsa_code,)
+        ).fetchone()
+        if not ref:
+            raise HTTPException(status_code=404, detail=f"Metro {cbsa_code} not found")
+
+        # Metrics: implied_new_households, vacancy_rate
+        metrics = conn.execute(
+            """SELECT year, implied_new_households, vacancy_rate_annual_avg
+               FROM metrics_metro_annual
+               WHERE cbsa_code = ? ORDER BY year""",
+            (cbsa_code,),
+        ).fetchall()
+
+        # Population (for migration proxy: YoY change)
+        pop_rows = conn.execute(
+            "SELECT year, population FROM population WHERE cbsa_code = ? ORDER BY year",
+            (cbsa_code,),
+        ).fetchall()
+
+        # Income from housing_stock (ACS)
+        income_rows = conn.execute(
+            "SELECT year, median_hh_income FROM housing_stock WHERE cbsa_code = ? ORDER BY year",
+            (cbsa_code,),
+        ).fetchall()
+
+        # Mortgage rate (national)
+        mortgage_rows = conn.execute(
+            "SELECT year, mortgage_rate_annual_avg FROM metrics_national_annual ORDER BY year"
+        ).fetchall()
+
+    # Build population YoY change series
+    pop_list = [(r[0], r[1]) for r in pop_rows if r[1]]
+    pop_change = []
+    for i in range(1, len(pop_list)):
+        pop_change.append({
+            "year": pop_list[i][0],
+            "value": pop_list[i][1] - pop_list[i - 1][1],
+        })
+
+    # Filter to last ~15 years for cleaner sparklines
+    min_year = 2008
+
+    def series(rows, year_col, val_col):
+        out = []
+        for r in rows:
+            d = dict(r) if not isinstance(r, dict) else r
+            yr = d.get(year_col, d.get("year"))
+            val = d.get(val_col, d.get("value"))
+            if yr and yr >= min_year and val is not None:
+                out.append({"year": yr, "value": round(val, 6) if isinstance(val, float) else val})
+        return out
+
+    return {
+        "cbsa_code": cbsa_code,
+        "cbsa_name": dict(ref)["cbsa_name"],
+        "hh_formation": series(metrics, "year", "implied_new_households"),
+        "vacancy_rate": series(metrics, "year", "vacancy_rate_annual_avg"),
+        "migration": [p for p in pop_change if p["year"] >= min_year],
+        "income": series(income_rows, "year", "median_hh_income"),
+        "mortgage_rate": series(mortgage_rows, "year", "mortgage_rate_annual_avg"),
+        "population": series(pop_rows, "year", "population"),
+    }
+
+
 @router.get("/compare")
 def compare_metros(
     cbsa_code_1: str = Query(..., description="First metro CBSA code"),

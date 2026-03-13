@@ -177,8 +177,11 @@ def get_all_scenarios(cbsa_code: str):
 @router.post("/interpret")
 async def interpret_scenario(request: InterpretRequest):
     """Call Claude API to interpret a scenario. Returns a streaming response."""
-    if not ANTHROPIC_API_KEY:
-        raise HTTPException(status_code=500, detail="ANTHROPIC_API_KEY not configured")
+    if not ANTHROPIC_API_KEY or ANTHROPIC_API_KEY == "your_anthropic_key_here":
+        raise HTTPException(
+            status_code=503,
+            detail="ANTHROPIC_API_KEY not configured. Add your real API key to the .env file."
+        )
 
     import anthropic
 
