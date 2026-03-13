@@ -1,5 +1,15 @@
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useCallback, useMemo } from 'react';
 import { useApi, useStreamingApi } from '../hooks/useApi';
+
+/* ── Scenario parameter adjustments (mirrors scenario_params.yaml) ── */
+const PARAM_ADJUSTMENTS = {
+  hh_formation: { low: 0.90, baseline: 1.00, high: 1.10 },
+  demolition:   { low: 0.0015, baseline: 0.0025, high: 0.0035 },
+  migration:    { reverting: 0.50, flat: 1.00, continuing: 1.25 },
+  income_growth:{ stagnant: 0.00, baseline: 0.02, strong: 0.04 },
+  borrowing:    { tight: 0.015, baseline: 0.0, loose: -0.015 },  // rate_shock
+  demographic:  { aging: 0.92, baseline: 1.00, millennial_surge: 1.12 },
+};
 
 const SLIDER_LABELS = {
   hh_formation: {
@@ -26,7 +36,7 @@ const SLIDER_LABELS = {
     unit: 'pop \u0394/yr',
     format: v => {
       const sign = v >= 0 ? '+' : '';
-      return v >= 1000 || v <= -1000
+      return Math.abs(v) >= 1000
         ? `${sign}${(v / 1000).toFixed(1)}k`
         : `${sign}${Math.round(v).toLocaleString()}`;
     },
@@ -63,100 +73,246 @@ const HORIZON_LABELS = ['1yr', '2yr', '3yr', '5yr', '7yr', '10yr'];
 const DEFAULT_QUESTION =
   'Given this scenario, what are the investment implications for homebuilder exposure (DHI, LEN, NVR) and regional bank credit risk in this market?';
 
-/* ── Mini Sparkline (SVG) ────────────────────────────────── */
-function Sparkline({ data, color = '#3b82f6', width = 120, height = 32 }) {
-  if (!data || data.length < 2) return null;
+/* ── Projection functions per slider ─────────────────────── */
+function projectTrend(sliderKey, sliderValue, historicalData, horizon, allParams) {
+  if (!historicalData || historicalData.length < 2) return [];
 
-  const values = data.map(d => d.value);
+  const last = historicalData[historicalData.length - 1];
+  const prev = historicalData[historicalData.length - 2];
+  const lastYear = last.year;
+  const lastVal = last.value;
+  const projected = [];
+
+  // Compute recent growth rate (3-year average if available)
+  const recentN = Math.min(historicalData.length, 4);
+  const recentStart = historicalData[historicalData.length - recentN];
+  const baseGrowthRate = recentN > 1 && recentStart.value !== 0
+    ? (lastVal / recentStart.value) ** (1 / (recentN - 1)) - 1
+    : 0;
+
+  for (let yr = 1; yr <= horizon; yr++) {
+    const futureYear = lastYear + yr;
+    let projectedVal;
+
+    switch (sliderKey) {
+      case 'hh_formation': {
+        // HH formation multiplier applied to last value, with demographic cross-effect
+        const hhAdj = PARAM_ADJUSTMENTS.hh_formation[sliderValue];
+        const demoAdj = PARAM_ADJUSTMENTS.demographic[allParams.demographic];
+        projectedVal = lastVal * hhAdj * demoAdj;
+        break;
+      }
+      case 'demolition': {
+        // Vacancy rate shifts proportionally to demolition rate vs baseline
+        const demoRate = PARAM_ADJUSTMENTS.demolition[sliderValue];
+        const baseRate = PARAM_ADJUSTMENTS.demolition.baseline;
+        const rateDiff = demoRate - baseRate;
+        // Higher demolition → vacancy rises; ~0.1% vacancy per 0.1% demolition per year
+        projectedVal = lastVal + rateDiff * yr * 0.8;
+        projectedVal = Math.max(0, projectedVal);
+        break;
+      }
+      case 'migration': {
+        // Migration multiplier on recent pop change
+        const migAdj = PARAM_ADJUSTMENTS.migration[sliderValue];
+        projectedVal = lastVal * migAdj;
+        // Reverting trends toward zero over time
+        if (sliderValue === 'reverting') {
+          projectedVal = lastVal * (1 - (1 - migAdj) * Math.min(yr / horizon, 1));
+        }
+        break;
+      }
+      case 'income_growth': {
+        // Compound growth at selected rate
+        const rate = PARAM_ADJUSTMENTS.income_growth[sliderValue];
+        projectedVal = lastVal * Math.pow(1 + rate, yr);
+        break;
+      }
+      case 'borrowing': {
+        // Rate shock applied as level shift
+        const shock = PARAM_ADJUSTMENTS.borrowing[sliderValue];
+        projectedVal = lastVal + shock;
+        projectedVal = Math.max(0.01, projectedVal);
+        break;
+      }
+      case 'demographic': {
+        // Population growth scaled by demographic multiplier
+        const demoAdj = PARAM_ADJUSTMENTS.demographic[sliderValue];
+        const recentGrowth = lastVal - prev.value;
+        projectedVal = lastVal + recentGrowth * demoAdj * yr;
+        break;
+      }
+      default:
+        projectedVal = lastVal;
+    }
+
+    projected.push({ year: futureYear, value: projectedVal });
+  }
+
+  return projected;
+}
+
+/* ── Sparkline with projection (SVG) ─────────────────────── */
+function Sparkline({ historical, projected, color = '#3b82f6', width = 140, height = 36 }) {
+  if (!historical || historical.length < 2) return null;
+
+  const allData = [...historical, ...(projected || [])];
+  const histLen = historical.length;
+  const values = allData.map(d => d.value);
   const minVal = Math.min(...values);
   const maxVal = Math.max(...values);
   const range = maxVal - minVal || 1;
 
-  const padding = 2;
+  const padding = 3;
   const chartW = width - padding * 2;
   const chartH = height - padding * 2;
 
-  const points = values.map((v, i) => {
-    const x = padding + (i / (values.length - 1)) * chartW;
+  const toPoint = (v, i) => {
+    const x = padding + (i / (allData.length - 1)) * chartW;
     const y = padding + chartH - ((v - minVal) / range) * chartH;
-    return `${x},${y}`;
-  }).join(' ');
+    return { x, y };
+  };
 
-  // Trend color: compare last vs first
-  const trendUp = values[values.length - 1] > values[0];
-  const lineColor = color;
+  const allPoints = values.map((v, i) => toPoint(v, i));
 
-  // Area fill
-  const firstX = padding;
-  const lastX = padding + chartW;
-  const areaPath = `M ${points.split(' ')[0]} ${points.split(' ').slice(1).map(p => `L ${p}`).join(' ')} L ${lastX},${height - padding} L ${firstX},${height - padding} Z`;
+  // Historical portion
+  const histPoints = allPoints.slice(0, histLen);
+  const histStr = histPoints.map(p => `${p.x},${p.y}`).join(' ');
+
+  // Projected portion (starts from last historical point)
+  const projPoints = allPoints.slice(histLen - 1); // overlap at junction
+  const projStr = projPoints.map(p => `${p.x},${p.y}`).join(' ');
+
+  // Area under historical
+  const firstX = histPoints[0].x;
+  const lastHistX = histPoints[histLen - 1].x;
+  const bottom = height - padding;
+
+  // Unique gradient ID
+  const gradId = `grad-${color.replace('#', '')}-${width}`;
+  const projGradId = `projgrad-${color.replace('#', '')}-${width}`;
 
   return (
-    <svg width={width} height={height} className="inline-block">
+    <svg width={width} height={height} className="inline-block flex-shrink-0">
       <defs>
-        <linearGradient id={`grad-${color.replace('#', '')}`} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={lineColor} stopOpacity="0.15" />
-          <stop offset="100%" stopColor={lineColor} stopOpacity="0.02" />
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.12" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.01" />
+        </linearGradient>
+        <linearGradient id={projGradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={color} stopOpacity="0.08" />
+          <stop offset="100%" stopColor={color} stopOpacity="0.01" />
         </linearGradient>
       </defs>
+
+      {/* Historical area fill */}
       <polygon
-        points={`${firstX},${height - padding} ${points} ${lastX},${height - padding}`}
-        fill={`url(#grad-${color.replace('#', '')})`}
+        points={`${firstX},${bottom} ${histStr} ${lastHistX},${bottom}`}
+        fill={`url(#${gradId})`}
       />
+
+      {/* Projected area fill */}
+      {projPoints.length > 1 && (() => {
+        const projFirstX = projPoints[0].x;
+        const projLastX = projPoints[projPoints.length - 1].x;
+        return (
+          <polygon
+            points={`${projFirstX},${bottom} ${projStr} ${projLastX},${bottom}`}
+            fill={`url(#${projGradId})`}
+          />
+        );
+      })()}
+
+      {/* Historical line (solid) */}
       <polyline
-        points={points}
+        points={histStr}
         fill="none"
-        stroke={lineColor}
+        stroke={color}
         strokeWidth="1.5"
         strokeLinecap="round"
         strokeLinejoin="round"
       />
-      {/* Dot on latest value */}
-      {(() => {
-        const lastPoint = points.split(' ').pop().split(',');
-        return (
-          <circle
-            cx={parseFloat(lastPoint[0])}
-            cy={parseFloat(lastPoint[1])}
-            r="2.5"
-            fill={lineColor}
-          />
-        );
-      })()}
+
+      {/* Projected line (dashed) */}
+      {projPoints.length > 1 && (
+        <polyline
+          points={projStr}
+          fill="none"
+          stroke={color}
+          strokeWidth="1.5"
+          strokeDasharray="3,2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.7"
+        />
+      )}
+
+      {/* Junction dot (end of historical) */}
+      <circle
+        cx={histPoints[histLen - 1].x}
+        cy={histPoints[histLen - 1].y}
+        r="2"
+        fill="white"
+        stroke={color}
+        strokeWidth="1.5"
+      />
+
+      {/* End-of-projection dot */}
+      {projPoints.length > 1 && (
+        <circle
+          cx={allPoints[allPoints.length - 1].x}
+          cy={allPoints[allPoints.length - 1].y}
+          r="2.5"
+          fill={color}
+          opacity="0.7"
+        />
+      )}
     </svg>
   );
 }
 
-/* ── Trend badge (latest value + direction) ─────────────── */
-function TrendBadge({ data, format, unit }) {
-  if (!data || data.length < 1) return null;
+/* ── Trend badge showing projected end value ─────────────── */
+function TrendBadge({ historical, projected, format, unit }) {
+  if (!historical || historical.length < 1) return null;
 
-  const latest = data[data.length - 1];
-  const prev = data.length >= 2 ? data[data.length - 2] : null;
+  const hasProjection = projected && projected.length > 0;
+  const displayData = hasProjection ? projected : historical;
+  const latest = displayData[displayData.length - 1];
+  const base = historical[historical.length - 1];
   const latestVal = format(latest.value);
 
   let arrow = '';
   let arrowColor = 'text-gray-400';
-  if (prev) {
-    const diff = latest.value - prev.value;
-    const pctChange = prev.value !== 0 ? Math.abs(diff / prev.value) : 0;
+  const diff = latest.value - base.value;
+  const pctChange = base.value !== 0 ? Math.abs(diff / base.value) : 0;
+
+  if (hasProjection && diff !== 0) {
     if (diff > 0) {
       arrow = '\u2191';
       arrowColor = pctChange > 0.05 ? 'text-green-600' : 'text-green-400';
-    } else if (diff < 0) {
+    } else {
       arrow = '\u2193';
       arrowColor = pctChange > 0.05 ? 'text-red-600' : 'text-red-400';
-    } else {
-      arrow = '\u2192';
+    }
+  } else if (!hasProjection) {
+    const prev = historical.length >= 2 ? historical[historical.length - 2] : null;
+    if (prev) {
+      const d = latest.value - prev.value;
+      const pc = prev.value !== 0 ? Math.abs(d / prev.value) : 0;
+      if (d > 0) { arrow = '\u2191'; arrowColor = pc > 0.05 ? 'text-green-600' : 'text-green-400'; }
+      else if (d < 0) { arrow = '\u2193'; arrowColor = pc > 0.05 ? 'text-red-600' : 'text-red-400'; }
+      else { arrow = '\u2192'; }
     }
   }
 
   return (
-    <div className="flex items-center gap-1 text-xs">
-      <span className="font-semibold text-gray-700">{latestVal}</span>
+    <div className="flex items-center gap-1 text-xs min-w-0">
+      <span className="font-semibold text-gray-700 truncate">{latestVal}</span>
       {arrow && <span className={`font-bold ${arrowColor}`}>{arrow}</span>}
-      <span className="text-gray-400">{unit}</span>
-      {latest.year && <span className="text-gray-300">({latest.year})</span>}
+      <span className="text-gray-400 truncate">{unit}</span>
+      <span className="text-gray-300">
+        ({hasProjection ? `${latest.year}e` : latest.year})
+      </span>
     </div>
   );
 }
@@ -205,6 +361,18 @@ function Panel3_ScenarioBuilder({ metros }) {
 
   const { response: claudeResponse, isStreaming, stream } = useStreamingApi();
 
+  // Compute projections for each slider
+  const projections = useMemo(() => {
+    if (!trends) return {};
+    const result = {};
+    for (const key of Object.keys(SLIDER_LABELS)) {
+      const config = SLIDER_LABELS[key];
+      const hist = trends[config.trendKey];
+      result[key] = projectTrend(key, params[key], hist, params.horizon, params);
+    }
+    return result;
+  }, [trends, params]);
+
   const handleSliderChange = useCallback((key, idx) => {
     const values = SLIDER_LABELS[key].values;
     setParams(prev => ({ ...prev, [key]: values[idx] }));
@@ -247,36 +415,46 @@ function Panel3_ScenarioBuilder({ metros }) {
 
   // Sparkline colors per slider category
   const sparkColors = {
-    hh_formation: '#6366f1',  // indigo
-    demolition: '#f59e0b',    // amber
-    migration: '#10b981',     // emerald
-    income_growth: '#3b82f6', // blue
-    borrowing: '#ef4444',     // red
-    demographic: '#8b5cf6',   // violet
+    hh_formation: '#6366f1',
+    demolition: '#f59e0b',
+    migration: '#10b981',
+    income_growth: '#3b82f6',
+    borrowing: '#ef4444',
+    demographic: '#8b5cf6',
   };
 
   const renderSliderWithSparkline = (key) => {
     const config = SLIDER_LABELS[key];
     const currentIdx = config.values.indexOf(params[key]);
     const trendData = trends?.[config.trendKey] || [];
+    const projData = projections[key] || [];
     const color = sparkColors[key];
 
     return (
       <div key={key} className="bg-gray-50 rounded-lg p-3">
-        <div className="flex items-start justify-between mb-1">
-          <label className="block text-sm font-medium text-gray-700">
-            {config.title}
-          </label>
-        </div>
+        <label className="block text-sm font-medium text-gray-700 mb-1">
+          {config.title}
+        </label>
 
-        {/* Sparkline + latest value row */}
+        {/* Sparkline + projected value row */}
         {trendData.length >= 2 ? (
           <div className="flex items-center gap-2 mb-2">
-            <Sparkline data={trendData} color={color} width={100} height={28} />
-            <TrendBadge data={trendData} format={config.format} unit={config.unit} />
+            <Sparkline
+              historical={trendData}
+              projected={projData}
+              color={color}
+              width={130}
+              height={32}
+            />
+            <TrendBadge
+              historical={trendData}
+              projected={projData}
+              format={config.format}
+              unit={config.unit}
+            />
           </div>
         ) : (
-          <div className="text-xs text-gray-300 mb-2 h-7 flex items-center">No trend data</div>
+          <div className="text-xs text-gray-300 mb-2 h-8 flex items-center">No trend data</div>
         )}
 
         {/* Slider */}
