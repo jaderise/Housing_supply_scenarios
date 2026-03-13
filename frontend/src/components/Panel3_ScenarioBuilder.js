@@ -3,22 +3,39 @@ import { useApi, useStreamingApi } from '../hooks/useApi';
 
 const SLIDER_LABELS = {
   hh_formation: {
+    title: 'Household Formation',
     values: ['low', 'baseline', 'high'],
-    labels: ['Low (-10% vs. trend)', 'Baseline (2010-2019)', 'High (+10% vs. trend)'],
+    labels: ['Low (-10%)', 'Baseline', 'High (+10%)'],
   },
   demolition: {
+    title: 'Demolition Rate',
     values: ['low', 'baseline', 'high'],
-    labels: ['Low (0.15%/yr)', 'Baseline (0.25%/yr)', 'High (0.35%/yr)'],
+    labels: ['Low (0.15%/yr)', 'Baseline (0.25%)', 'High (0.35%)'],
   },
   migration: {
+    title: 'Migration Trend',
     values: ['reverting', 'flat', 'continuing'],
-    labels: ['Reverting (pre-2020)', 'Flat (recent levels)', 'Continuing (pandemic pace)'],
+    labels: ['Reverting', 'Flat', 'Continuing'],
   },
-  horizon: {
-    values: [1, 2, 3],
-    labels: ['1 Year', '2 Years', '3 Years'],
+  income_growth: {
+    title: 'Income Growth',
+    values: ['stagnant', 'baseline', 'strong'],
+    labels: ['Stagnant (0%)', 'Baseline (+2%)', 'Strong (+4%)'],
+  },
+  borrowing: {
+    title: 'Borrowing Environment',
+    values: ['tight', 'baseline', 'loose'],
+    labels: ['Tight (+150bp)', 'Baseline', 'Loose (-150bp)'],
+  },
+  demographic: {
+    title: 'Demographic Shift',
+    values: ['aging', 'baseline', 'millennial_surge'],
+    labels: ['Aging (slower)', 'Baseline', 'Millennial surge'],
   },
 };
+
+const HORIZON_VALUES = [1, 2, 3, 5, 7, 10];
+const HORIZON_LABELS = ['1yr', '2yr', '3yr', '5yr', '7yr', '10yr'];
 
 const DEFAULT_QUESTION =
   'Given this scenario, what are the investment implications for homebuilder exposure (DHI, LEN, NVR) and regional bank credit risk in this market?';
@@ -29,23 +46,28 @@ function Panel3_ScenarioBuilder({ metros }) {
     hh_formation: 'baseline',
     demolition: 'baseline',
     migration: 'flat',
+    income_growth: 'baseline',
+    borrowing: 'baseline',
+    demographic: 'baseline',
     horizon: 3,
   });
   const [userQuestion, setUserQuestion] = useState(DEFAULT_QUESTION);
   const [compareMetro, setCompareMetro] = useState('');
   const [showCompare, setShowCompare] = useState(false);
 
+  const qs = `hh_formation=${params.hh_formation}&demolition=${params.demolition}&migration=${params.migration}&income_growth=${params.income_growth}&borrowing=${params.borrowing}&demographic=${params.demographic}&horizon=${params.horizon}`;
+
   const endpoint = scenarioMetro
-    ? `/api/scenario/${scenarioMetro}?hh_formation=${params.hh_formation}&demolition=${params.demolition}&migration=${params.migration}&horizon=${params.horizon}`
+    ? `/api/scenario/${scenarioMetro}?${qs}`
     : null;
 
-  const { data: scenario } = useApi(endpoint, [scenarioMetro, params.hh_formation, params.demolition, params.migration, params.horizon]);
+  const { data: scenario } = useApi(endpoint, [scenarioMetro, ...Object.values(params)]);
 
   const compareEndpoint = showCompare && compareMetro
-    ? `/api/scenario/${compareMetro}?hh_formation=${params.hh_formation}&demolition=${params.demolition}&migration=${params.migration}&horizon=${params.horizon}`
+    ? `/api/scenario/${compareMetro}?${qs}`
     : null;
 
-  const { data: compareScenario } = useApi(compareEndpoint, [compareMetro, params.hh_formation, params.demolition, params.migration, params.horizon]);
+  const { data: compareScenario } = useApi(compareEndpoint, [compareMetro, ...Object.values(params)]);
 
   const { data: metroLatest } = useApi(
     scenarioMetro ? `/api/metro/${scenarioMetro}/latest` : null,
@@ -58,6 +80,10 @@ function Panel3_ScenarioBuilder({ metros }) {
   const handleSliderChange = useCallback((key, idx) => {
     const values = SLIDER_LABELS[key].values;
     setParams(prev => ({ ...prev, [key]: values[idx] }));
+  }, []);
+
+  const handleHorizonChange = useCallback((idx) => {
+    setParams(prev => ({ ...prev, horizon: HORIZON_VALUES[idx] }));
   }, []);
 
   const handleInterpret = useCallback(() => {
@@ -88,6 +114,8 @@ function Panel3_ScenarioBuilder({ metros }) {
       user_question: userQuestion,
     });
   }, [scenario, metroLatest, nationalTs, scenarioMetro, params, userQuestion, metros, stream]);
+
+  const horizonIdx = HORIZON_VALUES.indexOf(params.horizon);
 
   return (
     <div className="space-y-6">
@@ -135,15 +163,17 @@ function Panel3_ScenarioBuilder({ metros }) {
       {/* Scenario Sliders */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Scenario Parameters</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          {Object.entries(SLIDER_LABELS).map(([key, config]) => {
+
+        {/* Supply & Demand section */}
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Supply & Demand</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+          {['hh_formation', 'demolition', 'migration'].map(key => {
+            const config = SLIDER_LABELS[key];
             const currentIdx = config.values.indexOf(params[key]);
             return (
               <div key={key}>
                 <label className="block text-sm font-medium text-gray-700 mb-2">
-                  {key === 'hh_formation' ? 'Household Formation' :
-                   key === 'demolition' ? 'Demolition/Obsolescence' :
-                   key === 'migration' ? 'Migration Trend' : 'Time Horizon'}
+                  {config.title}
                 </label>
                 <input
                   type="range"
@@ -167,6 +197,65 @@ function Panel3_ScenarioBuilder({ metros }) {
               </div>
             );
           })}
+        </div>
+
+        {/* Economic & Demographic section */}
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Economic & Demographic</p>
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mb-6">
+          {['income_growth', 'borrowing', 'demographic'].map(key => {
+            const config = SLIDER_LABELS[key];
+            const currentIdx = config.values.indexOf(params[key]);
+            return (
+              <div key={key}>
+                <label className="block text-sm font-medium text-gray-700 mb-2">
+                  {config.title}
+                </label>
+                <input
+                  type="range"
+                  min={0}
+                  max={2}
+                  step={1}
+                  value={currentIdx}
+                  onChange={e => handleSliderChange(key, parseInt(e.target.value))}
+                  className="w-full"
+                />
+                <div className="flex justify-between text-xs text-gray-500 mt-1">
+                  {config.labels.map((label, i) => (
+                    <span
+                      key={i}
+                      className={i === currentIdx ? 'font-bold text-blue-600' : ''}
+                    >
+                      {label}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        {/* Time Horizon */}
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Projection Horizon</p>
+        <div>
+          <input
+            type="range"
+            min={0}
+            max={HORIZON_VALUES.length - 1}
+            step={1}
+            value={horizonIdx >= 0 ? horizonIdx : 2}
+            onChange={e => handleHorizonChange(parseInt(e.target.value))}
+            className="w-full max-w-md"
+          />
+          <div className="flex justify-between text-xs text-gray-500 mt-1 max-w-md">
+            {HORIZON_LABELS.map((label, i) => (
+              <span
+                key={i}
+                className={i === horizonIdx ? 'font-bold text-blue-600' : ''}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -209,7 +298,7 @@ function Panel3_ScenarioBuilder({ metros }) {
               {isStreaming && <span className="animate-pulse">|</span>}
             </div>
             <p className="text-xs text-gray-400 mt-3">
-              Analysis generated by Claude based on precalculated scenario data
+              Analysis generated by Claude based on real-time scenario calculation
             </p>
           </div>
         )}
@@ -221,20 +310,30 @@ function Panel3_ScenarioBuilder({ metros }) {
 function ScenarioCard({ title, scenario }) {
   if (!scenario) return null;
 
-  const deficitColor = (scenario.end_state_deficit || 0) < 0 ? 'text-red-600' : 'text-green-600';
+  const deficit = scenario.end_state_deficit || 0;
+  const deficitColor = deficit < 0 ? 'text-red-600' : 'text-green-600';
+  const signal = deficit > 0 ? 'OVERSUPPLY' : 'UNDERSUPPLY';
+  const signalColor = deficit > 0 ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800';
 
   return (
     <div className="bg-white rounded-lg border border-gray-200 p-6">
-      <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wide">{title}</h4>
-      <p className="text-sm text-gray-700 mt-1">{scenario.cbsa_name}</p>
+      <div className="flex items-center justify-between">
+        <div>
+          <h4 className="text-sm font-medium text-gray-500 uppercase tracking-wide">{title}</h4>
+          <p className="text-sm text-gray-700 mt-1">{scenario.cbsa_name}</p>
+        </div>
+        <span className={`text-xs font-bold px-2 py-1 rounded ${signalColor}`}>
+          {signal}
+        </span>
+      </div>
 
       <div className={`text-4xl font-bold mt-3 ${deficitColor}`}>
         {scenario.end_state_deficit != null
-          ? `${scenario.end_state_deficit < 0 ? '' : '+'}${scenario.end_state_deficit.toLocaleString()}`
+          ? `${deficit < 0 ? '' : '+'}${deficit.toLocaleString()}`
           : '--'
         }
       </div>
-      <p className="text-sm text-gray-500">projected end-state deficit</p>
+      <p className="text-sm text-gray-500">projected end-state deficit ({scenario.horizon_years}yr)</p>
 
       <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
         <div>
@@ -247,7 +346,9 @@ function ScenarioCard({ title, scenario }) {
         </div>
         <div>
           <span className="text-gray-500">Surplus/Deficit:</span>
-          <span className="ml-1 font-medium">{scenario.projected_surplus_deficit?.toLocaleString()}</span>
+          <span className={`ml-1 font-medium ${(scenario.projected_surplus_deficit || 0) >= 0 ? 'text-green-600' : 'text-red-600'}`}>
+            {scenario.projected_surplus_deficit?.toLocaleString()}
+          </span>
         </div>
         <div>
           <span className="text-gray-500">Current Baseline:</span>

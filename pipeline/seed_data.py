@@ -49,19 +49,21 @@ METRO_POP_2023 = {
 # Permits per 1000 residents baseline (2019 level, approximate)
 # Sun Belt metros have higher rates; coastal constrained metros lower
 PERMITS_PER_1K = {
-    "35620": 2.5, "31080": 2.8, "16980": 3.0, "19100": 8.5,
-    "26420": 8.0, "47900": 4.0, "33100": 5.5, "37980": 2.5,
-    "12060": 7.5, "14460": 3.5, "38060": 10.0, "40140": 5.0,
-    "41860": 3.0, "42660": 5.5, "33460": 4.0, "41740": 3.5,
-    "45300": 8.0, "19740": 6.5, "41700": 7.0, "38900": 5.0,
-    "36740": 8.5, "40900": 5.0, "38300": 2.0, "12420": 12.0,
-    "17460": 4.0, "16740": 9.5, "29820": 9.0, "34980": 8.0,
-    "26900": 5.5, "41180": 3.0, "27260": 8.0, "18140": 5.0,
-    "47260": 3.5, "14860": 1.5, "39580": 10.0, "13820": 3.5,
-    "36420": 5.0, "33340": 2.5, "40060": 4.5, "28140": 5.0,
-    "35380": 3.0, "31140": 4.5, "41620": 7.0, "39300": 2.0,
+    # Coastal constrained = low permits; Sun Belt boom = high permits
+    # Markets with very high permits + slowing population = oversupply candidates
+    "35620": 2.5, "31080": 2.8, "16980": 3.0, "19100": 9.5,
+    "26420": 9.0, "47900": 4.0, "33100": 5.5, "37980": 2.5,
+    "12060": 8.5, "14460": 3.5, "38060": 14.0, "40140": 5.0,
+    "41860": 2.5, "42660": 5.5, "33460": 4.0, "41740": 3.0,
+    "45300": 9.0, "19740": 6.5, "41700": 8.0, "38900": 5.0,
+    "36740": 10.0, "40900": 5.5, "38300": 2.0, "12420": 16.0,
+    "17460": 4.0, "16740": 12.0, "29820": 13.0, "34980": 10.0,
+    "26900": 5.5, "41180": 2.5, "27260": 9.0, "18140": 5.0,
+    "47260": 3.5, "14860": 1.5, "39580": 14.0, "13820": 3.5,
+    "36420": 5.0, "33340": 2.5, "40060": 4.5, "28140": 5.5,
+    "35380": 3.0, "31140": 5.0, "41620": 8.0, "39300": 2.0,
     "32820": 3.5, "25540": 1.5, "15380": 1.5, "40380": 1.5,
-    "24340": 5.5, "46060": 5.5,
+    "24340": 6.0, "46060": 6.0,
 }
 
 # Median household income (2022 approx)
@@ -114,9 +116,26 @@ def _housing_cycle_factor(year: int) -> float:
     elif year == 2020:
         return 0.95  # COVID dip
     elif year <= 2022:
-        return 1.05 + 0.05 * (year - 2020)  # Pandemic boom
+        return 1.10 + 0.05 * (year - 2020)  # Pandemic boom (stronger)
+    elif year == 2023:
+        return 1.15  # Construction stayed elevated
     else:
-        return 1.05  # Normalization
+        return 1.10  # Slight normalization but still above trend
+
+
+# Markets where building outpaced population growth → oversupply
+# These had massive pandemic-era construction booms but population is now decelerating
+OVERSUPPLY_METROS = {
+    "12420",  # Austin
+    "29820",  # Las Vegas
+    "38060",  # Phoenix
+    "39580",  # Raleigh
+    "16740",  # Charlotte
+    "36740",  # Orlando
+    "45300",  # Tampa
+    "34980",  # Nashville
+    "27260",  # Jacksonville
+}
 
 
 def _pop_growth_rate(cbsa_code: str, year: int) -> float:
@@ -127,9 +146,15 @@ def _pop_growth_rate(cbsa_code: str, year: int) -> float:
 
     base_rate = 0.012 if is_sun_belt else 0.004
 
-    # Pandemic migration boost for Sun Belt
-    if is_sun_belt and year >= 2020:
+    # Pandemic migration boost for Sun Belt (2020-2022)
+    if is_sun_belt and 2020 <= year <= 2022:
         base_rate += 0.008
+    elif is_sun_belt and year >= 2023:
+        # Post-pandemic deceleration for Sun Belt, especially oversupply metros
+        if cbsa_code in OVERSUPPLY_METROS:
+            base_rate += 0.001  # Sharp slowdown from boom levels
+        else:
+            base_rate += 0.004  # Moderate cooldown
     elif not is_sun_belt and year >= 2020:
         base_rate -= 0.002
 

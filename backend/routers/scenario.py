@@ -1,8 +1,8 @@
-"""Scenario Builder API endpoints (Panel 3)."""
+"""Scenario Builder API endpoints (Panel 3) — real-time calculation."""
 
 import os
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import StreamingResponse
 
 from backend.db import get_db
@@ -12,55 +12,157 @@ from backend.config import ANTHROPIC_API_KEY
 router = APIRouter(prefix="/api", tags=["scenario"])
 
 
+def _compute_scenario(conn, cbsa_code: str, hh_formation: str, demolition: str,
+                      migration: str, income_growth: str, borrowing: str,
+                      demographic: str, horizon: int):
+    """Compute a single scenario in real time from metrics data."""
+    from pipeline.utils.cbsa_utils import load_scenario_params
+
+    params = load_scenario_params()
+
+    ref = conn.execute(
+        "SELECT cbsa_name FROM cbsa_reference WHERE cbsa_code = ?", (cbsa_code,)
+    ).fetchone()
+    if not ref:
+        return None
+
+    # Load metro metrics
+    metrics_rows = conn.execute(
+        "SELECT * FROM metrics_metro_annual WHERE cbsa_code = ? ORDER BY year",
+        (cbsa_code,),
+    ).fetchall()
+    if not metrics_rows:
+        return None
+    metrics = [dict(r) for r in metrics_rows]
+    latest = metrics[-1]
+
+    # Current baseline deficit
+    current_deficit = float(latest.get("cumulative_deficit_since_2008") or 0)
+
+    # Implied HH formation trend (last 3 years average)
+    recent = metrics[-3:] if len(metrics) >= 3 else metrics
+    hh_trend = sum(float(m.get("implied_new_households") or 0) for m in recent) / len(recent)
+
+    # Trailing permit rate (latest year)
+    permits_row = conn.execute(
+        "SELECT permits_total FROM permits WHERE cbsa_code = ? ORDER BY year DESC LIMIT 1",
+        (cbsa_code,),
+    ).fetchone()
+    trailing_permit_rate = float(dict(permits_row)["permits_total"]) if permits_row else 0
+
+    # Current housing stock
+    stock_row = conn.execute(
+        "SELECT total_units FROM housing_stock WHERE cbsa_code = ? ORDER BY year DESC LIMIT 1",
+        (cbsa_code,),
+    ).fetchone()
+    current_stock = float(dict(stock_row)["total_units"]) if stock_row else 0
+
+    # Net domestic migration trend
+    pop_rows = conn.execute(
+        "SELECT domestic_migration_net FROM population WHERE cbsa_code = ? ORDER BY year DESC LIMIT 3",
+        (cbsa_code,),
+    ).fetchall()
+    recent_mig = sum(float(dict(r)["domestic_migration_net"] or 0) for r in pop_rows) / max(len(pop_rows), 1)
+
+    # --- Parameter adjustments ---
+    hh_adj = params["hh_formation"][hh_formation]["adjustment"]
+    demo_rate = params["demolition"][demolition]["rate"]
+    mig_adj = params["migration"][migration]["adjustment"]
+    income_rate = params["income_growth"][income_growth]["rate"]
+    borrow_ltv_adj = params["borrowing_environment"][borrowing]["ltv_adjustment"]
+    demo_hh_adj = params["demographic_shift"][demographic]["hh_adjustment"]
+
+    # Combined HH formation multiplier: base * hh_formation * demographic_shift
+    combined_hh_adj = hh_adj * demo_hh_adj
+
+    # Borrowing affects completions (tighter credit = fewer starts = fewer completions)
+    completions_adj = borrow_ltv_adj
+
+    projected_hh = 0
+    projected_comp = 0
+    running_deficit = current_deficit
+
+    for yr in range(1, horizon + 1):
+        # HH formation: trend * adjustments + migration shift
+        yr_hh = hh_trend * combined_hh_adj + recent_mig * (mig_adj - 1.0)
+
+        # Income growth affects demand (higher income = more household formation capacity)
+        income_factor = (1 + income_rate) ** yr
+        yr_hh *= (1 + (income_factor - 1) * 0.3)  # 30% passthrough of income to HH formation
+
+        # Demolition
+        yr_demolition = current_stock * demo_rate
+
+        # Completions: trailing rate * borrowing adjustment
+        yr_completions = trailing_permit_rate * completions_adj
+
+        # Annual net
+        yr_net = yr_completions - yr_hh - yr_demolition
+        running_deficit += yr_net
+        projected_hh += yr_hh
+        projected_comp += yr_completions
+
+    projected_surplus_deficit = int(
+        projected_comp - projected_hh - current_stock * demo_rate * horizon
+    )
+
+    # Build scenario label
+    label_parts = [
+        params["hh_formation"][hh_formation]["label"],
+        params["demolition"][demolition]["label"],
+        params["migration"][migration]["label"],
+        params["income_growth"][income_growth]["label"],
+        params["borrowing_environment"][borrowing]["label"],
+        params["demographic_shift"][demographic]["label"],
+        f"{horizon}yr",
+    ]
+
+    return {
+        "cbsa_code": cbsa_code,
+        "cbsa_name": dict(ref)["cbsa_name"],
+        "hh_formation_assumption": hh_formation,
+        "demolition_assumption": demolition,
+        "migration_assumption": migration,
+        "income_growth_assumption": income_growth,
+        "borrowing_assumption": borrowing,
+        "demographic_assumption": demographic,
+        "horizon_years": horizon,
+        "current_deficit_baseline": int(current_deficit),
+        "projected_new_households": int(projected_hh),
+        "projected_completions": int(projected_comp),
+        "projected_surplus_deficit": projected_surplus_deficit,
+        "end_state_deficit": int(running_deficit),
+        "scenario_label": " | ".join(label_parts),
+    }
+
+
 @router.get("/scenario/{cbsa_code}")
 def get_scenario(
     cbsa_code: str,
     hh_formation: str = "baseline",
     demolition: str = "baseline",
     migration: str = "flat",
+    income_growth: str = "baseline",
+    borrowing: str = "baseline",
+    demographic: str = "baseline",
     horizon: int = 3,
 ):
-    """Return a single scenario grid row."""
+    """Compute and return a single scenario in real time."""
     with get_db() as conn:
-        ref = conn.execute(
-            "SELECT cbsa_name FROM cbsa_reference WHERE cbsa_code = ?", (cbsa_code,)
-        ).fetchone()
-        if not ref:
-            raise HTTPException(status_code=404, detail=f"Metro {cbsa_code} not found")
+        result = _compute_scenario(
+            conn, cbsa_code, hh_formation, demolition, migration,
+            income_growth, borrowing, demographic, horizon
+        )
 
-        row = conn.execute(
-            """SELECT * FROM scenario_grid
-               WHERE cbsa_code = ?
-               AND hh_formation_assumption = ?
-               AND demolition_assumption = ?
-               AND migration_assumption = ?
-               AND horizon_years = ?""",
-            (cbsa_code, hh_formation, demolition, migration, horizon),
-        ).fetchone()
+    if not result:
+        raise HTTPException(status_code=404, detail=f"Metro {cbsa_code} not found or no data")
 
-    if not row:
-        raise HTTPException(status_code=404, detail="Scenario not found")
-
-    d = dict(row)
-    return {
-        "cbsa_code": cbsa_code,
-        "cbsa_name": dict(ref)["cbsa_name"],
-        "hh_formation_assumption": d.get("hh_formation_assumption"),
-        "demolition_assumption": d.get("demolition_assumption"),
-        "migration_assumption": d.get("migration_assumption"),
-        "horizon_years": d.get("horizon_years"),
-        "current_deficit_baseline": d.get("current_deficit_baseline"),
-        "projected_new_households": d.get("projected_new_households"),
-        "projected_completions": d.get("projected_completions"),
-        "projected_surplus_deficit": d.get("projected_surplus_deficit"),
-        "end_state_deficit": d.get("end_state_deficit"),
-        "scenario_label": d.get("scenario_label"),
-    }
+    return result
 
 
 @router.get("/scenario/{cbsa_code}/all")
 def get_all_scenarios(cbsa_code: str):
-    """Return all 81 scenario combinations for a metro."""
+    """Return all pre-computed scenario combinations for a metro (legacy, from grid)."""
     with get_db() as conn:
         rows = conn.execute(
             "SELECT * FROM scenario_grid WHERE cbsa_code = ?", (cbsa_code,)
@@ -80,7 +182,6 @@ async def interpret_scenario(request: InterpretRequest):
 
     import anthropic
 
-    # Build migration note
     migration = request.scenario_params.get("migration", "flat")
     migration_notes = {
         "reverting": "(pandemic migration wave normalizing to pre-2020 trend)",
@@ -103,6 +204,9 @@ Scenario selected:
 - Household formation assumption: {request.scenario_params.get('hh_formation', 'baseline')}
 - Demolition/obsolescence rate: {request.scenario_params.get('demolition', 'baseline')}
 - Migration trend: {migration} {migration_note}
+- Income growth: {request.scenario_params.get('income_growth', 'baseline')}
+- Borrowing environment: {request.scenario_params.get('borrowing', 'baseline')}
+- Demographic shift: {request.scenario_params.get('demographic', 'baseline')}
 - Time horizon: {request.scenario_params.get('horizon', 3)} year(s)
 
 Scenario output:

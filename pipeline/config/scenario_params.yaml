@@ -40,9 +40,57 @@ migration:
     adjustment: 1.25
     description: "Migration remains elevated at pandemic peak rate"
 
+income_growth:
+  stagnant:
+    label: "Stagnant (0%/yr)"
+    rate: 0.00
+    description: "Real incomes flat — wage growth matches inflation"
+  baseline:
+    label: "Baseline (+2%/yr real)"
+    rate: 0.02
+    description: "Historical average real income growth"
+  strong:
+    label: "Strong (+4%/yr real)"
+    rate: 0.04
+    description: "Tight labor market with above-trend wage gains"
+
+borrowing_environment:
+  tight:
+    label: "Tight (rates +150bp)"
+    rate_shock: 0.015
+    ltv_adjustment: 0.90
+    description: "Credit tightening: higher rates, lower LTV limits"
+  baseline:
+    label: "Baseline (current)"
+    rate_shock: 0.0
+    ltv_adjustment: 1.00
+    description: "Current mortgage rate and lending standards persist"
+  loose:
+    label: "Loose (rates -150bp)"
+    rate_shock: -0.015
+    ltv_adjustment: 1.10
+    description: "Rate cuts and loosened credit — refi boom scenario"
+
+demographic_shift:
+  aging:
+    label: "Aging (slower turnover)"
+    hh_adjustment: 0.92
+    description: "Baby Boomer aging-in-place reduces turnover; fewer starter-home buyers"
+  baseline:
+    label: "Baseline"
+    hh_adjustment: 1.00
+    description: "Current age distribution trends continue"
+  millennial_surge:
+    label: "Millennial surge"
+    hh_adjustment: 1.12
+    description: "Peak millennial family formation wave — high demand for starter homes"
+
 horizon:
-  values: [1, 2, 3]
+  values: [1, 2, 3, 5, 7, 10]
   labels:
     1: "1 Year"
     2: "2 Years"
     3: "3 Years"
+    5: "5 Years"
+    7: "7 Years"
+    10: "10 Years"
