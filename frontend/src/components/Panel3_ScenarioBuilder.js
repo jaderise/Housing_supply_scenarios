@@ -3,37 +3,53 @@ import { useApi, useStreamingApi } from '../hooks/useApi';
 
 /* ── Scenario parameter adjustments (mirrors scenario_params.yaml) ── */
 const PARAM_ADJUSTMENTS = {
-  hh_formation: { low: 0.90, baseline: 1.00, high: 1.10 },
-  demolition:   { low: 0.0015, baseline: 0.0025, high: 0.0035 },
-  migration:    { reverting: 0.50, flat: 1.00, continuing: 1.25 },
-  income_growth:{ stagnant: 0.00, baseline: 0.02, strong: 0.04 },
-  borrowing:    { tight: 0.015, baseline: 0.0, loose: -0.015 },  // rate_shock
-  demographic:  { aging: 0.92, baseline: 1.00, millennial_surge: 1.12 },
+  hh_formation: {
+    very_low: 0.90, low: 0.95, baseline: 1.00, high: 1.05, very_high: 1.10,
+  },
+  demolition: {
+    very_low: 0.0010, low: 0.0015, baseline: 0.0025, high: 0.0030, very_high: 0.0035,
+  },
+  migration: {
+    strong_decline: 0.50, moderate_decline: 0.75, flat: 1.00,
+    moderate_growth: 1.25, strong_growth: 1.50,
+  },
+  income_growth: {
+    negative: -0.02, stagnant: 0.00, baseline: 0.02, strong: 0.04, very_strong: 0.06,
+  },
+  borrowing: {
+    very_tight: 0.015, tight: 0.0075, baseline: 0.0, loose: -0.0075, very_loose: -0.015,
+  },
+  demographic: {
+    shrinking: 0.85, slow: 0.92, baseline: 1.00, growing: 1.08, surging: 1.15,
+  },
 };
 
 const SLIDER_LABELS = {
   hh_formation: {
     title: 'Household Formation',
-    values: ['low', 'baseline', 'high'],
-    labels: ['Low (-10%)', 'Baseline', 'High (+10%)'],
-    trendKey: 'hh_formation',
-    unit: 'HH/yr',
-    format: v => v >= 1000 ? `${(v / 1000).toFixed(1)}k` : Math.round(v).toLocaleString(),
+    subtitle: 'New households forming locally',
+    values: ['very_low', 'low', 'baseline', 'high', 'very_high'],
+    labels: ['-10%/yr', '-5%/yr', 'Trend', '+5%/yr', '+10%/yr'],
+    trendKey: 'hh_formation_growth',
+    unit: 'growth rate',
+    format: v => `${(v * 100).toFixed(1)}%`,
   },
   demolition: {
-    title: 'Demolition Rate',
-    values: ['low', 'baseline', 'high'],
-    labels: ['Low (0.15%/yr)', 'Baseline (0.25%)', 'High (0.35%)'],
+    title: 'Vacancy Rate',
+    subtitle: 'Housing stock loss rate',
+    values: ['very_low', 'low', 'baseline', 'high', 'very_high'],
+    labels: ['0.10%/yr', '0.15%/yr', '0.25%/yr', '0.30%/yr', '0.35%/yr'],
     trendKey: 'vacancy_rate',
     unit: 'vacancy %',
     format: v => `${(v * 100).toFixed(1)}%`,
   },
   migration: {
-    title: 'Migration Trend',
-    values: ['reverting', 'flat', 'continuing'],
-    labels: ['Reverting', 'Flat', 'Continuing'],
+    title: 'Net Domestic Migration',
+    subtitle: 'People relocating to/from this metro',
+    values: ['strong_decline', 'moderate_decline', 'flat', 'moderate_growth', 'strong_growth'],
+    labels: ['-50%', '-25%', 'Current', '+25%', '+50%'],
     trendKey: 'migration',
-    unit: 'pop \u0394/yr',
+    unit: 'people/yr',
     format: v => {
       const sign = v >= 0 ? '+' : '';
       return Math.abs(v) >= 1000
@@ -42,28 +58,31 @@ const SLIDER_LABELS = {
     },
   },
   income_growth: {
-    title: 'Income Growth',
-    values: ['stagnant', 'baseline', 'strong'],
-    labels: ['Stagnant (0%)', 'Baseline (+2%)', 'Strong (+4%)'],
+    title: 'Median Income',
+    subtitle: 'Real household income growth',
+    values: ['negative', 'stagnant', 'baseline', 'strong', 'very_strong'],
+    labels: ['-2%/yr', '0%/yr', '+2%/yr', '+4%/yr', '+6%/yr'],
     trendKey: 'income',
     unit: 'median HH$',
     format: v => `$${(v / 1000).toFixed(0)}k`,
   },
   borrowing: {
-    title: 'Borrowing Environment',
-    values: ['tight', 'baseline', 'loose'],
-    labels: ['Tight (+150bp)', 'Baseline', 'Loose (-150bp)'],
+    title: '30-Year Mortgage Rate',
+    subtitle: 'Rate change vs. current level',
+    values: ['very_tight', 'tight', 'baseline', 'loose', 'very_loose'],
+    labels: ['+150bp', '+75bp', 'Current', '-75bp', '-150bp'],
     trendKey: 'mortgage_rate',
     unit: '30yr rate',
     format: v => `${(v * 100).toFixed(1)}%`,
   },
   demographic: {
-    title: 'Demographic Shift',
-    values: ['aging', 'baseline', 'millennial_surge'],
-    labels: ['Aging (slower)', 'Baseline', 'Millennial surge'],
-    trendKey: 'population',
-    unit: 'population',
-    format: v => v >= 1e6 ? `${(v / 1e6).toFixed(2)}M` : `${(v / 1000).toFixed(0)}k`,
+    title: 'Prime Homebuyer Cohort (25-44)',
+    subtitle: 'Growth of prime-age homebuyers',
+    values: ['shrinking', 'slow', 'baseline', 'growing', 'surging'],
+    labels: ['-4%/yr', '-2%/yr', 'Trend', '+2%/yr', '+4%/yr'],
+    trendKey: 'population_growth',
+    unit: 'pop growth',
+    format: v => `${(v * 100).toFixed(2)}%`,
   },
 };
 
@@ -72,6 +91,26 @@ const HORIZON_LABELS = ['1yr', '2yr', '3yr', '5yr', '7yr', '10yr'];
 
 const DEFAULT_QUESTION =
   'Given this scenario, what are the investment implications for homebuilder exposure (DHI, LEN, NVR) and regional bank credit risk in this market?';
+
+/* ── Region ordering for metro grouping ─────────────────── */
+const REGION_ORDER = ['Northeast', 'Midwest', 'South', 'West'];
+
+function groupMetrosByRegion(metros) {
+  const groups = {};
+  for (const region of REGION_ORDER) {
+    groups[region] = [];
+  }
+  for (const m of (metros || [])) {
+    const region = m.region || 'Other';
+    if (!groups[region]) groups[region] = [];
+    groups[region].push(m);
+  }
+  // Sort alphabetically within each region
+  for (const region of Object.keys(groups)) {
+    groups[region].sort((a, b) => a.cbsa_name.localeCompare(b.cbsa_name));
+  }
+  return groups;
+}
 
 /* ── Projection functions per slider ─────────────────────── */
 function projectTrend(sliderKey, sliderValue, historicalData, horizon, allParams) {
@@ -83,43 +122,31 @@ function projectTrend(sliderKey, sliderValue, historicalData, horizon, allParams
   const lastVal = last.value;
   const projected = [];
 
-  // Compute recent growth rate (3-year average if available)
-  const recentN = Math.min(historicalData.length, 4);
-  const recentStart = historicalData[historicalData.length - recentN];
-  const baseGrowthRate = recentN > 1 && recentStart.value !== 0
-    ? (lastVal / recentStart.value) ** (1 / (recentN - 1)) - 1
-    : 0;
-
   for (let yr = 1; yr <= horizon; yr++) {
     const futureYear = lastYear + yr;
     let projectedVal;
 
     switch (sliderKey) {
       case 'hh_formation': {
-        // HH formation multiplier applied to last value, with demographic cross-effect
-        const hhAdj = PARAM_ADJUSTMENTS.hh_formation[sliderValue];
-        const demoAdj = PARAM_ADJUSTMENTS.demographic[allParams.demographic];
-        projectedVal = lastVal * hhAdj * demoAdj;
+        // Sparkline shows growth rate — project the CAGR the user chose
+        // CAGR mapping: very_low=-0.10, low=-0.05, baseline=0, high=+0.05, very_high=+0.10
+        const cagrMap = { very_low: -0.10, low: -0.05, baseline: 0, high: 0.05, very_high: 0.10 };
+        projectedVal = cagrMap[sliderValue] ?? 0;
         break;
       }
       case 'demolition': {
-        // Vacancy rate shifts proportionally to demolition rate vs baseline
+        // Vacancy rate shifts based on demolition rate delta vs baseline
         const demoRate = PARAM_ADJUSTMENTS.demolition[sliderValue];
         const baseRate = PARAM_ADJUSTMENTS.demolition.baseline;
         const rateDiff = demoRate - baseRate;
-        // Higher demolition → vacancy rises; ~0.1% vacancy per 0.1% demolition per year
         projectedVal = lastVal + rateDiff * yr * 0.8;
         projectedVal = Math.max(0, projectedVal);
         break;
       }
       case 'migration': {
-        // Migration multiplier on recent pop change
+        // Migration multiplier on recent level
         const migAdj = PARAM_ADJUSTMENTS.migration[sliderValue];
         projectedVal = lastVal * migAdj;
-        // Reverting trends toward zero over time
-        if (sliderValue === 'reverting') {
-          projectedVal = lastVal * (1 - (1 - migAdj) * Math.min(yr / horizon, 1));
-        }
         break;
       }
       case 'income_growth': {
@@ -129,17 +156,17 @@ function projectTrend(sliderKey, sliderValue, historicalData, horizon, allParams
         break;
       }
       case 'borrowing': {
-        // Rate shock applied as level shift
+        // Rate shock as level shift
         const shock = PARAM_ADJUSTMENTS.borrowing[sliderValue];
         projectedVal = lastVal + shock;
         projectedVal = Math.max(0.01, projectedVal);
         break;
       }
       case 'demographic': {
-        // Population growth scaled by demographic multiplier
+        // Population growth rate scaled by demographic multiplier
         const demoAdj = PARAM_ADJUSTMENTS.demographic[sliderValue];
-        const recentGrowth = lastVal - prev.value;
-        projectedVal = lastVal + recentGrowth * demoAdj * yr;
+        // Project the growth rate itself, adjusted by the demographic factor
+        projectedVal = lastVal * demoAdj;
         break;
       }
       default:
@@ -167,30 +194,22 @@ function Sparkline({ historical, projected, color = '#3b82f6', width = 140, heig
   const chartW = width - padding * 2;
   const chartH = height - padding * 2;
 
-  const toPoint = (v, i) => {
-    const x = padding + (i / (allData.length - 1)) * chartW;
-    const y = padding + chartH - ((v - minVal) / range) * chartH;
-    return { x, y };
-  };
+  const allPoints = values.map((v, i) => ({
+    x: padding + (i / (allData.length - 1)) * chartW,
+    y: padding + chartH - ((v - minVal) / range) * chartH,
+  }));
 
-  const allPoints = values.map((v, i) => toPoint(v, i));
-
-  // Historical portion
   const histPoints = allPoints.slice(0, histLen);
   const histStr = histPoints.map(p => `${p.x},${p.y}`).join(' ');
-
-  // Projected portion (starts from last historical point)
-  const projPoints = allPoints.slice(histLen - 1); // overlap at junction
+  const projPoints = allPoints.slice(histLen - 1);
   const projStr = projPoints.map(p => `${p.x},${p.y}`).join(' ');
 
-  // Area under historical
   const firstX = histPoints[0].x;
   const lastHistX = histPoints[histLen - 1].x;
   const bottom = height - padding;
 
-  // Unique gradient ID
   const gradId = `grad-${color.replace('#', '')}-${width}`;
-  const projGradId = `projgrad-${color.replace('#', '')}-${width}`;
+  const projGradId = `pgrad-${color.replace('#', '')}-${width}`;
 
   return (
     <svg width={width} height={height} className="inline-block flex-shrink-0">
@@ -205,19 +224,19 @@ function Sparkline({ historical, projected, color = '#3b82f6', width = 140, heig
         </linearGradient>
       </defs>
 
-      {/* Historical area fill */}
+      {/* Historical area */}
       <polygon
         points={`${firstX},${bottom} ${histStr} ${lastHistX},${bottom}`}
         fill={`url(#${gradId})`}
       />
 
-      {/* Projected area fill */}
+      {/* Projected area */}
       {projPoints.length > 1 && (() => {
-        const projFirstX = projPoints[0].x;
-        const projLastX = projPoints[projPoints.length - 1].x;
+        const pFirstX = projPoints[0].x;
+        const pLastX = projPoints[projPoints.length - 1].x;
         return (
           <polygon
-            points={`${projFirstX},${bottom} ${projStr} ${projLastX},${bottom}`}
+            points={`${pFirstX},${bottom} ${projStr} ${pLastX},${bottom}`}
             fill={`url(#${projGradId})`}
           />
         );
@@ -247,7 +266,7 @@ function Sparkline({ historical, projected, color = '#3b82f6', width = 140, heig
         />
       )}
 
-      {/* Junction dot (end of historical) */}
+      {/* Junction dot */}
       <circle
         cx={histPoints[histLen - 1].x}
         cy={histPoints[histLen - 1].y}
@@ -271,13 +290,14 @@ function Sparkline({ historical, projected, color = '#3b82f6', width = 140, heig
   );
 }
 
-/* ── Trend badge showing projected end value ─────────────── */
+/* ── Trend badge ─────────────────────────────────────────── */
 function TrendBadge({ historical, projected, format, unit }) {
   if (!historical || historical.length < 1) return null;
 
   const hasProjection = projected && projected.length > 0;
-  const displayData = hasProjection ? projected : historical;
-  const latest = displayData[displayData.length - 1];
+  const latest = hasProjection
+    ? projected[projected.length - 1]
+    : historical[historical.length - 1];
   const base = historical[historical.length - 1];
   const latestVal = format(latest.value);
 
@@ -287,22 +307,16 @@ function TrendBadge({ historical, projected, format, unit }) {
   const pctChange = base.value !== 0 ? Math.abs(diff / base.value) : 0;
 
   if (hasProjection && diff !== 0) {
-    if (diff > 0) {
-      arrow = '\u2191';
-      arrowColor = pctChange > 0.05 ? 'text-green-600' : 'text-green-400';
-    } else {
-      arrow = '\u2193';
-      arrowColor = pctChange > 0.05 ? 'text-red-600' : 'text-red-400';
-    }
-  } else if (!hasProjection) {
-    const prev = historical.length >= 2 ? historical[historical.length - 2] : null;
-    if (prev) {
-      const d = latest.value - prev.value;
-      const pc = prev.value !== 0 ? Math.abs(d / prev.value) : 0;
-      if (d > 0) { arrow = '\u2191'; arrowColor = pc > 0.05 ? 'text-green-600' : 'text-green-400'; }
-      else if (d < 0) { arrow = '\u2193'; arrowColor = pc > 0.05 ? 'text-red-600' : 'text-red-400'; }
-      else { arrow = '\u2192'; }
-    }
+    arrow = diff > 0 ? '\u2191' : '\u2193';
+    arrowColor = pctChange > 0.05
+      ? (diff > 0 ? 'text-green-600' : 'text-red-600')
+      : (diff > 0 ? 'text-green-400' : 'text-red-400');
+  } else if (!hasProjection && historical.length >= 2) {
+    const prev = historical[historical.length - 2];
+    const d = latest.value - prev.value;
+    if (d > 0) { arrow = '\u2191'; arrowColor = 'text-green-400'; }
+    else if (d < 0) { arrow = '\u2193'; arrowColor = 'text-red-400'; }
+    else { arrow = '\u2192'; }
   }
 
   return (
@@ -319,7 +333,7 @@ function TrendBadge({ historical, projected, format, unit }) {
 
 /* ── Main Component ──────────────────────────────────────── */
 function Panel3_ScenarioBuilder({ metros }) {
-  const [scenarioMetro, setScenarioMetro] = useState('38060');
+  const [scenarioMetro, setScenarioMetro] = useState('35620');
   const [params, setParams] = useState({
     hh_formation: 'baseline',
     demolition: 'baseline',
@@ -335,33 +349,27 @@ function Panel3_ScenarioBuilder({ metros }) {
 
   const qs = `hh_formation=${params.hh_formation}&demolition=${params.demolition}&migration=${params.migration}&income_growth=${params.income_growth}&borrowing=${params.borrowing}&demographic=${params.demographic}&horizon=${params.horizon}`;
 
-  const endpoint = scenarioMetro
-    ? `/api/scenario/${scenarioMetro}?${qs}`
-    : null;
-
+  const endpoint = scenarioMetro ? `/api/scenario/${scenarioMetro}?${qs}` : null;
   const { data: scenario } = useApi(endpoint, [scenarioMetro, ...Object.values(params)]);
 
   const compareEndpoint = showCompare && compareMetro
-    ? `/api/scenario/${compareMetro}?${qs}`
-    : null;
-
+    ? `/api/scenario/${compareMetro}?${qs}` : null;
   const { data: compareScenario } = useApi(compareEndpoint, [compareMetro, ...Object.values(params)]);
 
   const { data: metroLatest } = useApi(
-    scenarioMetro ? `/api/metro/${scenarioMetro}/latest` : null,
-    [scenarioMetro]
+    scenarioMetro ? `/api/metro/${scenarioMetro}/latest` : null, [scenarioMetro]
   );
   const { data: nationalTs } = useApi('/api/national/timeseries');
-
-  // Fetch trend data for sparklines
   const { data: trends } = useApi(
-    scenarioMetro ? `/api/metro/${scenarioMetro}/trends` : null,
-    [scenarioMetro]
+    scenarioMetro ? `/api/metro/${scenarioMetro}/trends` : null, [scenarioMetro]
   );
 
   const { response: claudeResponse, isStreaming, stream } = useStreamingApi();
 
-  // Compute projections for each slider
+  // Group metros by region
+  const metroGroups = useMemo(() => groupMetrosByRegion(metros), [metros]);
+
+  // Compute projections
   const projections = useMemo(() => {
     if (!trends) return {};
     const result = {};
@@ -385,8 +393,12 @@ function Panel3_ScenarioBuilder({ metros }) {
   const handleInterpret = useCallback(() => {
     if (!scenario || !metroLatest) return;
 
-    const nationalDeficit = nationalTs?.cumulative_deficit_baseline?.[nationalTs.cumulative_deficit_baseline.length - 1] || 0;
-    const mortgageRate = nationalTs?.mortgage_rate_annual_avg?.[nationalTs.mortgage_rate_annual_avg.length - 1] || 0;
+    const nationalDeficit = nationalTs?.cumulative_deficit_baseline?.[
+      nationalTs.cumulative_deficit_baseline.length - 1
+    ] || 0;
+    const mortgageRate = nationalTs?.mortgage_rate_annual_avg?.[
+      nationalTs.mortgage_rate_annual_avg.length - 1
+    ] || 0;
 
     stream({
       cbsa_code: scenarioMetro,
@@ -403,17 +415,13 @@ function Panel3_ScenarioBuilder({ metros }) {
         mortgage_pct_income: metroLatest.mortgage_pct_median_income || 0,
         sun_belt: metros.find(m => m.cbsa_code === scenarioMetro)?.sun_belt || false,
       },
-      national_context: {
-        national_deficit: nationalDeficit,
-        mortgage_rate: mortgageRate,
-      },
+      national_context: { national_deficit: nationalDeficit, mortgage_rate: mortgageRate },
       user_question: userQuestion,
     });
   }, [scenario, metroLatest, nationalTs, scenarioMetro, params, userQuestion, metros, stream]);
 
   const horizonIdx = HORIZON_VALUES.indexOf(params.horizon);
 
-  // Sparkline colors per slider category
   const sparkColors = {
     hh_formation: '#6366f1',
     demolition: '#f59e0b',
@@ -432,11 +440,16 @@ function Panel3_ScenarioBuilder({ metros }) {
 
     return (
       <div key={key} className="bg-gray-50 rounded-lg p-3">
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          {config.title}
-        </label>
+        <div className="mb-1">
+          <label className="block text-sm font-medium text-gray-700">
+            {config.title}
+          </label>
+          {config.subtitle && (
+            <span className="text-xs text-gray-400">{config.subtitle}</span>
+          )}
+        </div>
 
-        {/* Sparkline + projected value row */}
+        {/* Sparkline + value */}
         {trendData.length >= 2 ? (
           <div className="flex items-center gap-2 mb-2">
             <Sparkline
@@ -457,11 +470,11 @@ function Panel3_ScenarioBuilder({ metros }) {
           <div className="text-xs text-gray-300 mb-2 h-8 flex items-center">No trend data</div>
         )}
 
-        {/* Slider */}
+        {/* 5-stop slider */}
         <input
           type="range"
           min={0}
-          max={2}
+          max={4}
           step={1}
           value={currentIdx}
           onChange={e => handleSliderChange(key, parseInt(e.target.value))}
@@ -472,6 +485,7 @@ function Panel3_ScenarioBuilder({ metros }) {
             <span
               key={i}
               className={i === currentIdx ? 'font-bold text-blue-600' : ''}
+              style={{ fontSize: '0.65rem' }}
             >
               {label}
             </span>
@@ -481,22 +495,37 @@ function Panel3_ScenarioBuilder({ metros }) {
     );
   };
 
-  return (
-    <div className="space-y-6">
-      {/* Metro Selector + Compare Toggle */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
-        <div className="flex items-center gap-4 flex-wrap">
-          <select
-            value={scenarioMetro}
-            onChange={e => setScenarioMetro(e.target.value)}
-            className="flex-1 min-w-[200px] border border-gray-300 rounded px-3 py-2 text-sm"
-          >
-            {(metros || []).map(m => (
+  const renderMetroSelect = (value, onChange, excludeCode) => (
+    <select
+      value={value}
+      onChange={onChange}
+      className="flex-1 min-w-[200px] border border-gray-300 rounded px-3 py-2 text-sm"
+    >
+      {!value && <option value="">Select metro...</option>}
+      {REGION_ORDER.map(region => {
+        const regionMetros = (metroGroups[region] || []).filter(
+          m => !excludeCode || m.cbsa_code !== excludeCode
+        );
+        if (regionMetros.length === 0) return null;
+        return (
+          <optgroup key={region} label={region}>
+            {regionMetros.map(m => (
               <option key={m.cbsa_code} value={m.cbsa_code}>
                 {m.cbsa_name}
               </option>
             ))}
-          </select>
+          </optgroup>
+        );
+      })}
+    </select>
+  );
+
+  return (
+    <div className="space-y-6">
+      {/* Metro Selector + Compare */}
+      <div className="bg-white rounded-lg border border-gray-200 p-4">
+        <div className="flex items-center gap-4 flex-wrap">
+          {renderMetroSelect(scenarioMetro, e => setScenarioMetro(e.target.value), null)}
 
           <label className="flex items-center gap-2 text-sm text-gray-600">
             <input
@@ -507,41 +536,33 @@ function Panel3_ScenarioBuilder({ metros }) {
             Compare
           </label>
 
-          {showCompare && (
-            <select
-              value={compareMetro}
-              onChange={e => setCompareMetro(e.target.value)}
-              className="flex-1 min-w-[200px] border border-gray-300 rounded px-3 py-2 text-sm"
-            >
-              <option value="">Select metro...</option>
-              {(metros || []).filter(m => m.cbsa_code !== scenarioMetro).map(m => (
-                <option key={m.cbsa_code} value={m.cbsa_code}>
-                  {m.cbsa_name}
-                </option>
-              ))}
-            </select>
+          {showCompare && renderMetroSelect(
+            compareMetro, e => setCompareMetro(e.target.value), scenarioMetro
           )}
         </div>
       </div>
 
-      {/* Scenario Sliders with Sparklines */}
+      {/* Scenario Sliders */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="text-lg font-semibold text-gray-800 mb-4">Scenario Parameters</h3>
 
-        {/* Supply & Demand section */}
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Supply & Demand</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Supply & Demand
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {['hh_formation', 'demolition', 'migration'].map(renderSliderWithSparkline)}
         </div>
 
-        {/* Economic & Demographic section */}
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Economic & Demographic</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Economic & Demographic
+        </p>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
           {['income_growth', 'borrowing', 'demographic'].map(renderSliderWithSparkline)}
         </div>
 
-        {/* Time Horizon */}
-        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">Projection Horizon</p>
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+          Projection Horizon
+        </p>
         <div>
           <input
             type="range"
@@ -554,10 +575,7 @@ function Panel3_ScenarioBuilder({ metros }) {
           />
           <div className="flex justify-between text-xs text-gray-500 mt-1 max-w-md">
             {HORIZON_LABELS.map((label, i) => (
-              <span
-                key={i}
-                className={i === horizonIdx ? 'font-bold text-blue-600' : ''}
-              >
+              <span key={i} className={i === horizonIdx ? 'font-bold text-blue-600' : ''}>
                 {label}
               </span>
             ))}

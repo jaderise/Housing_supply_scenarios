@@ -64,13 +64,19 @@ def _compute_scenario(conn, cbsa_code: str, hh_formation: str, demolition: str,
     ).fetchall()
     recent_mig = sum(float(dict(r)["domestic_migration_net"] or 0) for r in pop_rows) / max(len(pop_rows), 1)
 
-    # --- Parameter adjustments ---
-    hh_adj = params["hh_formation"][hh_formation]["adjustment"]
-    demo_rate = params["demolition"][demolition]["rate"]
-    mig_adj = params["migration"][migration]["adjustment"]
-    income_rate = params["income_growth"][income_growth]["rate"]
-    borrow_ltv_adj = params["borrowing_environment"][borrowing]["ltv_adjustment"]
-    demo_hh_adj = params["demographic_shift"][demographic]["hh_adjustment"]
+    # --- Parameter adjustments (with fallback for legacy values) ---
+    hh_cfg = params["hh_formation"].get(hh_formation, params["hh_formation"]["baseline"])
+    hh_adj = hh_cfg["adjustment"]
+    demo_cfg = params["demolition"].get(demolition, params["demolition"]["baseline"])
+    demo_rate = demo_cfg["rate"]
+    mig_cfg = params["migration"].get(migration, params["migration"]["flat"])
+    mig_adj = mig_cfg["adjustment"]
+    inc_cfg = params["income_growth"].get(income_growth, params["income_growth"]["baseline"])
+    income_rate = inc_cfg["rate"]
+    bor_cfg = params["borrowing_environment"].get(borrowing, params["borrowing_environment"]["baseline"])
+    borrow_ltv_adj = bor_cfg["ltv_adjustment"]
+    dem_cfg = params["demographic_shift"].get(demographic, params["demographic_shift"]["baseline"])
+    demo_hh_adj = dem_cfg["hh_adjustment"]
 
     # Combined HH formation multiplier: base * hh_formation * demographic_shift
     combined_hh_adj = hh_adj * demo_hh_adj
@@ -187,9 +193,11 @@ async def interpret_scenario(request: InterpretRequest):
 
     migration = request.scenario_params.get("migration", "flat")
     migration_notes = {
-        "reverting": "(pandemic migration wave normalizing to pre-2020 trend)",
-        "flat": "(migration staying at recent 2022-2023 levels)",
-        "continuing": "(migration remaining elevated at pandemic peak rate)",
+        "strong_decline": "(net migration falling 50% from current pace)",
+        "moderate_decline": "(net migration falling 25% from current pace)",
+        "flat": "(net migration staying at current pace)",
+        "moderate_growth": "(net migration accelerating 25% above current pace)",
+        "strong_growth": "(net migration accelerating 50% above current pace)",
     }
     migration_note = migration_notes.get(migration, "")
 

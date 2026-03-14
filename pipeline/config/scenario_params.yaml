@@ -1,89 +1,139 @@
 hh_formation:
-  low:
-    label: "Low (-10% vs. trend)"
+  very_low:
+    label: "Strong decline (-10%/yr)"
     adjustment: 0.90
-    description: "Formation rate 10% below the 2010-2019 average annual rate"
+    description: "Household formation rate declining 10% per year — severe demand contraction"
+  low:
+    label: "Moderate decline (-5%/yr)"
+    adjustment: 0.95
+    description: "Household formation rate declining 5% per year"
   baseline:
-    label: "Baseline (2010-2019 trend)"
+    label: "Trend (0%/yr)"
     adjustment: 1.00
-    description: "2010-2019 average annual rate (pre-pandemic trend)"
+    description: "Household formation continues at recent trend rate"
   high:
-    label: "High (+10% vs. trend)"
+    label: "Moderate growth (+5%/yr)"
+    adjustment: 1.05
+    description: "Household formation rate growing 5% per year"
+  very_high:
+    label: "Strong growth (+10%/yr)"
     adjustment: 1.10
-    description: "Formation rate 10% above the 2010-2019 average (pent-up demand release)"
+    description: "Household formation rate growing 10% per year — strong demand expansion"
 
 demolition:
+  very_low:
+    label: "0.10%/yr"
+    rate: 0.0010
+    description: "Minimal stock loss — newer housing stock, little demolition"
   low:
-    label: "Low (0.15%/yr)"
+    label: "0.15%/yr"
     rate: 0.0015
     description: "Lower end of academic estimates"
   baseline:
-    label: "Baseline (0.25%/yr)"
+    label: "0.25%/yr"
     rate: 0.0025
-    description: "Commonly used industry estimate; consistent with Freddie Mac methodology"
+    description: "Industry standard; consistent with Freddie Mac methodology"
   high:
-    label: "High (0.35%/yr)"
+    label: "0.30%/yr"
+    rate: 0.0030
+    description: "Above average stock loss due to aging inventory"
+  very_high:
+    label: "0.35%/yr"
     rate: 0.0035
     description: "Upper bound; reflects aging Sun Belt stock and climate risk"
 
 migration:
-  reverting:
-    label: "Reverting (normalize to pre-2020)"
+  strong_decline:
+    label: "Strong decline (-50%)"
     adjustment: 0.50
-    description: "Net domestic migration returns to 2015-2019 trend rate"
+    description: "Net migration falls to half of current pace"
+  moderate_decline:
+    label: "Moderate decline (-25%)"
+    adjustment: 0.75
+    description: "Net migration slows by 25% from current pace"
   flat:
-    label: "Flat (stay at recent levels)"
+    label: "Current pace (0%)"
     adjustment: 1.00
-    description: "Migration stays at 2022-2023 actual levels"
-  continuing:
-    label: "Continuing (maintain pandemic pace)"
+    description: "Net domestic migration stays at recent 2022-2024 level"
+  moderate_growth:
+    label: "Moderate growth (+25%)"
     adjustment: 1.25
-    description: "Migration remains elevated at pandemic peak rate"
+    description: "Net migration accelerates 25% above current pace"
+  strong_growth:
+    label: "Strong growth (+50%)"
+    adjustment: 1.50
+    description: "Net migration accelerates 50% above current pace"
 
 income_growth:
+  negative:
+    label: "-2%/yr"
+    rate: -0.02
+    description: "Real incomes declining — recession or persistent inflation eroding wages"
   stagnant:
-    label: "Stagnant (0%/yr)"
+    label: "0%/yr"
     rate: 0.00
     description: "Real incomes flat — wage growth matches inflation"
   baseline:
-    label: "Baseline (+2%/yr real)"
+    label: "+2%/yr"
     rate: 0.02
     description: "Historical average real income growth"
   strong:
-    label: "Strong (+4%/yr real)"
+    label: "+4%/yr"
     rate: 0.04
     description: "Tight labor market with above-trend wage gains"
+  very_strong:
+    label: "+6%/yr"
+    rate: 0.06
+    description: "Exceptional wage growth — sustained labor shortage"
 
 borrowing_environment:
-  tight:
-    label: "Tight (rates +150bp)"
+  very_tight:
+    label: "+150bp"
     rate_shock: 0.015
-    ltv_adjustment: 0.90
-    description: "Credit tightening: higher rates, lower LTV limits"
+    ltv_adjustment: 0.85
+    description: "Sharp credit tightening: rates rise 150bp, stricter lending"
+  tight:
+    label: "+75bp"
+    rate_shock: 0.0075
+    ltv_adjustment: 0.92
+    description: "Moderate tightening: rates rise 75bp"
   baseline:
-    label: "Baseline (current)"
+    label: "Current"
     rate_shock: 0.0
     ltv_adjustment: 1.00
     description: "Current mortgage rate and lending standards persist"
   loose:
-    label: "Loose (rates -150bp)"
+    label: "-75bp"
+    rate_shock: -0.0075
+    ltv_adjustment: 1.08
+    description: "Moderate easing: rates fall 75bp"
+  very_loose:
+    label: "-150bp"
     rate_shock: -0.015
-    ltv_adjustment: 1.10
-    description: "Rate cuts and loosened credit — refi boom scenario"
+    ltv_adjustment: 1.15
+    description: "Aggressive easing: rates fall 150bp, loosened credit — refi boom"
 
 demographic_shift:
-  aging:
-    label: "Aging (slower turnover)"
+  shrinking:
+    label: "Shrinking (-4%/yr)"
+    hh_adjustment: 0.85
+    description: "Sharp decline in prime homebuyer cohort (25-44) — aging population dominates"
+  slow:
+    label: "Slow growth (-2%/yr)"
     hh_adjustment: 0.92
-    description: "Baby Boomer aging-in-place reduces turnover; fewer starter-home buyers"
+    description: "Below-trend growth in prime homebuyer age group"
   baseline:
-    label: "Baseline"
+    label: "Trend (0%/yr)"
     hh_adjustment: 1.00
     description: "Current age distribution trends continue"
-  millennial_surge:
-    label: "Millennial surge"
-    hh_adjustment: 1.12
-    description: "Peak millennial family formation wave — high demand for starter homes"
+  growing:
+    label: "Above trend (+2%/yr)"
+    hh_adjustment: 1.08
+    description: "Above-trend growth in prime homebuyer cohort"
+  surging:
+    label: "Surging (+4%/yr)"
+    hh_adjustment: 1.15
+    description: "Peak millennial + Gen-Z family formation — strong first-time buyer wave"
 
 horizon:
   values: [1, 2, 3, 5, 7, 10]

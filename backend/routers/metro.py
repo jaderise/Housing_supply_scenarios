@@ -169,15 +169,40 @@ def get_metro_trends(cbsa_code: str):
                 out.append({"year": yr, "value": round(val, 6) if isinstance(val, float) else val})
         return out
 
+    # Build HH formation YoY growth rate using 3-year trailing avg (smooths noisy data)
+    hh_series = series(metrics, "year", "implied_new_households")
+    hh_growth = []
+    if len(hh_series) >= 4:
+        # Compute 3-year trailing averages, then growth rate between them
+        for i in range(3, len(hh_series)):
+            avg_prev = sum(p["value"] for p in hh_series[i-3:i]) / 3
+            avg_curr = sum(p["value"] for p in hh_series[i-2:i+1]) / 3
+            if avg_prev and abs(avg_prev) > 500:
+                rate = (avg_curr - avg_prev) / abs(avg_prev)
+                rate = max(-0.30, min(0.30, rate))
+                hh_growth.append({"year": hh_series[i]["year"], "value": round(rate, 6)})
+
+    # Build population YoY growth rate series
+    pop_series = series(pop_rows, "year", "population")
+    pop_growth = []
+    for i in range(1, len(pop_series)):
+        prev_val = pop_series[i - 1]["value"]
+        curr_val = pop_series[i]["value"]
+        if prev_val and prev_val != 0:
+            rate = (curr_val - prev_val) / abs(prev_val)
+            pop_growth.append({"year": pop_series[i]["year"], "value": round(rate, 6)})
+
     return {
         "cbsa_code": cbsa_code,
         "cbsa_name": dict(ref)["cbsa_name"],
-        "hh_formation": series(metrics, "year", "implied_new_households"),
+        "hh_formation": hh_series,
+        "hh_formation_growth": hh_growth,
         "vacancy_rate": series(metrics, "year", "vacancy_rate_annual_avg"),
         "migration": [p for p in pop_change if p["year"] >= min_year],
         "income": series(income_rows, "year", "median_hh_income"),
         "mortgage_rate": series(mortgage_rows, "year", "mortgage_rate_annual_avg"),
-        "population": series(pop_rows, "year", "population"),
+        "population": pop_series,
+        "population_growth": pop_growth,
     }
 
 
