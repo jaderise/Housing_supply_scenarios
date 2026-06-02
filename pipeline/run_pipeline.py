@@ -56,22 +56,6 @@ def run_fetch(config, logger):
             if name in critical_sources:
                 critical_failed = True
 
-    if critical_failed:
-        logger.info("  Direct fetchers failed for critical sources — trying GitHub mirrors")
-        try:
-            from pipeline.fetch import fetch_from_github
-            gh_results = fetch_from_github.run(config)
-            for key, gh_result in gh_results.items():
-                source_name = f"census_{key}" if key in ("permits", "population") else key
-                if gh_result.get("status") == "SUCCESS":
-                    results[source_name] = gh_result
-                    logger.info(f"  {source_name} (GitHub fallback): SUCCESS")
-            critical_failed = any(
-                results.get(s, {}).get("status") == "FAILED" for s in critical_sources
-            )
-        except Exception as e:
-            logger.error(f"  GitHub fallback failed: {e}")
-
     status = "FAILED" if critical_failed else "SUCCESS"
     log_stage_end(logger, "FETCH", status, f"{len(results)} sources processed")
     return status, results
