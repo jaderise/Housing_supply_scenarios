@@ -1,6 +1,12 @@
 """
-Fetches building permit data from Census BPS text files (historical)
+Fetches building permit data from Census BPS files (historical)
 and Census API (recent). Outputs one CSV per year to /data/raw/census_permits/.
+
+URL patterns by era:
+  - Pre-2019:  txt at census.gov/construction/bps/txt/tb3u{year}.txt
+  - 2019-2023: xls at census.gov/construction/bps/xls/msaannual_{year}99.xls
+  - 2024+:     xls at census.gov/construction/bps/xls/cbsaannual_{year}99.xls
+  - Fallback:  Census EITS API for all years (requires CENSUS_API_KEY)
 """
 
 import io
@@ -16,9 +22,9 @@ from pipeline.utils.cbsa_utils import load_pipeline_config, get_cbsa_codes
 
 logger = logging.getLogger("pipeline.fetch.census_permits")
 
-BPS_BASE_URL = "https://www.census.gov/construction/bps/txt"
+BPS_BASE_URL = "https://www.census.gov/construction/bps"
 CENSUS_API_URL = "https://api.census.gov/data/timeseries/eits/bps"
-GEOCODES_URL = f"{BPS_BASE_URL}/geocodes.txt"
+GEOCODES_URL = f"{BPS_BASE_URL}/txt/geocodes.txt"
 
 
 def fetch_geocodes(raw_dir: str) -> pd.DataFrame:
@@ -51,14 +57,14 @@ def fetch_geocodes(raw_dir: str) -> pd.DataFrame:
     return df
 
 
-def fetch_annual_text_file(year: int, raw_dir: str) -> pd.DataFrame:
-    """Download and parse an annual BPS text file."""
-    url = f"{BPS_BASE_URL}/tb3u{year}.txt"
-    logger.info(f"Fetching BPS annual file: {url}")
+def fetch_annual_text_file(year: int) -> pd.DataFrame:
+    """Download and parse a pre-2019 annual BPS metro text file."""
+    url = f"{BPS_BASE_URL}/txt/tb3u{year}.txt"
+    logger.info(f"Fetching BPS annual text file: {url}")
 
     resp = requests.get(url, timeout=120)
     if resp.status_code == 404:
-        logger.warning(f"BPS file not found for year {year}")
+        logger.warning(f"BPS text file not found for year {year}")
         return pd.DataFrame()
     resp.raise_for_status()
 
@@ -83,7 +89,68 @@ def fetch_annual_text_file(year: int, raw_dir: str) -> pd.DataFrame:
     return pd.DataFrame(records)
 
 
-def fetch_permits_api(year: int, raw_dir: str, api_key: str, delay: float = 0.5) -> pd.DataFrame:
+def fetch_annual_excel_file(year: int) -> pd.DataFrame:
+    """Download and parse a 2019+ annual BPS metro Excel file."""
+    if year >= 2024:
+        urls = [
+            f"{BPS_BASE_URL}/xls/cbsaannual_{year}99.xls",
+            f"{BPS_BASE_URL}/xls/msaannual_{year}99.xls",
+        ]
+    else:
+        urls = [
+            f"{BPS_BASE_URL}/xls/msaannual_{year}99.xls",
+            f"{BPS_BASE_URL}/xls/msaannual_{year}prelim.xls",
+        ]
+
+    for url in urls:
+        logger.info(f"Trying BPS Excel file: {url}")
+        try:
+            resp = requests.get(url, timeout=120)
+            if resp.status_code == 200 and len(resp.content) > 1000:
+                df = pd.read_excel(io.BytesIO(resp.content), dtype=str)
+                df.columns = df.columns.str.strip().str.lower().str.replace(" ", "_")
+
+                cbsa_col = None
+                for candidate in ["cbsa_code", "csa", "code", "cbsa"]:
+                    if candidate in df.columns:
+                        cbsa_col = candidate
+                        break
+                if not cbsa_col:
+                    cbsa_col = df.columns[0]
+
+                name_col = None
+                for candidate in ["cbsa_name", "name", "area_name", "cbsa_title"]:
+                    if candidate in df.columns:
+                        name_col = candidate
+                        break
+                if not name_col and len(df.columns) > 1:
+                    name_col = df.columns[1]
+
+                total_col = None
+                for candidate in ["total", "units", "total_units", "permits"]:
+                    if candidate in df.columns:
+                        total_col = candidate
+                        break
+
+                result = pd.DataFrame({
+                    "cbsa_code": df[cbsa_col].astype(str).str.strip(),
+                    "cbsa_name": df[name_col].astype(str).str.strip() if name_col else "",
+                    "year": year,
+                    "permits_total": pd.to_numeric(
+                        df[total_col] if total_col else df.iloc[:, 2],
+                        errors="coerce"
+                    ).fillna(0).astype(int),
+                })
+                return result
+        except Exception as e:
+            logger.debug(f"Excel URL failed: {url} - {e}")
+            continue
+
+    logger.warning(f"BPS Excel file not found for year {year}")
+    return pd.DataFrame()
+
+
+def fetch_permits_api(year: int, api_key: str, delay: float = 0.5) -> pd.DataFrame:
     """Fetch permit data via Census API for recent years."""
     logger.info(f"Fetching permits via Census API for {year}")
     records = []
@@ -114,8 +181,7 @@ def fetch_permits_api(year: int, raw_dir: str, api_key: str, delay: float = 0.5)
     if not records:
         return pd.DataFrame()
 
-    df = pd.DataFrame(records)
-    return df
+    return pd.DataFrame(records)
 
 
 def run(config: dict = None) -> dict:
@@ -130,61 +196,56 @@ def run(config: dict = None) -> dict:
     start_year = config["fetch"]["start_year"]
     end_year = config["fetch"]["end_year"]
     delay = config["fetch"]["request_delay_seconds"]
-    target_cbsas = set(get_cbsa_codes())
 
     files_written = 0
     files_existing = 0
     total_rows = 0
 
-    # Fetch geocodes crosswalk
     try:
         fetch_geocodes(raw_dir)
     except Exception as e:
         logger.error(f"Failed to fetch geocodes: {e}")
 
-    # Fetch annual text files for historical years
-    for year in range(start_year, end_year - 1):
+    for year in range(start_year, end_year + 1):
         out_path = os.path.join(raw_dir, f"census_permits_metro_annual_{year}.csv")
         if os.path.exists(out_path):
             logger.info(f"Skipping {year}, file exists")
             files_existing += 1
             continue
 
+        df = pd.DataFrame()
+
+        # Try the right source for the era
         try:
-            df = fetch_annual_text_file(year, raw_dir)
-            if not df.empty:
+            if year < 2019:
+                df = fetch_annual_text_file(year)
+            else:
+                df = fetch_annual_excel_file(year)
+        except Exception as e:
+            logger.warning(f"File fetch failed for {year}: {e}")
+
+        # Fall back to Census API if file fetch failed
+        if df.empty and api_key:
+            try:
+                df = fetch_permits_api(year, api_key, delay)
+            except Exception as e:
+                logger.error(f"API fetch also failed for {year}: {e}")
+
+        if not df.empty:
+            if "cbsa_code" in df.columns:
                 df["cbsa_code"] = df["cbsa_code"].astype(str).str.zfill(5)
-                # DQ: row count check
-                if len(df) < 50:
-                    logger.warning(f"Year {year}: only {len(df)} rows (expected > 300)")
-                # DQ: no negative permits
+            if len(df) < 50:
+                logger.warning(f"Year {year}: only {len(df)} rows (expected > 300)")
+            if "permits_total" in df.columns:
                 neg = df[df["permits_total"] < 0]
                 if not neg.empty:
                     logger.warning(f"Year {year}: {len(neg)} rows with negative permits")
 
-                df.to_csv(out_path, index=False)
-                files_written += 1
-                total_rows += len(df)
-            time.sleep(delay)
-        except Exception as e:
-            logger.error(f"Failed to fetch permits for {year}: {e}")
+            df.to_csv(out_path, index=False)
+            files_written += 1
+            total_rows += len(df)
 
-    # Fetch recent years via API
-    for year in range(max(end_year - 1, start_year), end_year + 1):
-        out_path = os.path.join(raw_dir, f"census_permits_metro_annual_{year}.csv")
-        if os.path.exists(out_path):
-            logger.info(f"Skipping {year}, file exists")
-            files_existing += 1
-            continue
-
-        try:
-            df = fetch_permits_api(year, raw_dir, api_key, delay)
-            if not df.empty:
-                df.to_csv(out_path, index=False)
-                files_written += 1
-                total_rows += len(df)
-        except Exception as e:
-            logger.error(f"Failed to fetch permits API for {year}: {e}")
+        time.sleep(delay)
 
     return {
         "source": "census_permits",

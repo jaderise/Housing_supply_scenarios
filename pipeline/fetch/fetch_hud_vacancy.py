@@ -1,6 +1,8 @@
 """
-Downloads HUD USPS vacancy files and zip-to-CBSA crosswalk files.
-Parses Excel files and writes CSVs.
+Downloads HUD USPS vacancy data via the HUD User API.
+Requires HUD_API_KEY (Bearer token from huduser.gov).
+
+API docs: https://www.huduser.gov/portal/dataset/uspsncwm-api.html
 """
 
 import logging
@@ -11,90 +13,51 @@ from pathlib import Path
 import pandas as pd
 import requests
 
-from pipeline.utils.cbsa_utils import load_pipeline_config
+from pipeline.utils.cbsa_utils import load_pipeline_config, get_cbsa_codes
 
 logger = logging.getLogger("pipeline.fetch.hud_vacancy")
 
-HUD_VACANCY_BASE = "https://www.huduser.gov/portal/datasets/usps"
-HUD_CROSSWALK_BASE = "https://www.huduser.gov/portal/datasets/usps_crosswalk"
+HUD_API_BASE = "https://www.huduser.gov/hudapi/public"
 
 
-def fetch_vacancy_quarter(year: int, quarter: int, raw_dir: str, delay: float = 0.5) -> bool:
-    """Download and parse a single quarter's vacancy data."""
-    out_path = os.path.join(raw_dir, f"hud_vacancy_zip_{year}Q{quarter}.csv")
-    if os.path.exists(out_path):
-        logger.info(f"Skipping {year}Q{quarter} vacancy, file exists")
-        return True
-
-    # Try common URL patterns
-    urls = [
-        f"{HUD_VACANCY_BASE}/USPS_Vacancy_{year}Q{quarter}.xlsx",
-        f"{HUD_VACANCY_BASE}/USPS_ZCTA_CITY_AP_{year}{quarter}.xlsx",
-        f"{HUD_VACANCY_BASE}/TABLE3_ALLSTATESANDUS_QTR{quarter}_{year}.xlsx",
-    ]
-
-    for url in urls:
-        try:
-            logger.info(f"Trying vacancy URL: {url}")
-            resp = requests.get(url, timeout=120)
-            if resp.status_code == 200:
-                df = pd.read_excel(
-                    pd.io.common.BytesIO(resp.content),
-                    dtype={"zip": str, "ZIP": str, "Zip Code": str},
-                )
-                # Normalize column names
-                df.columns = df.columns.str.lower().str.replace(" ", "_")
-
-                # Standardize zip column
-                for col in ["zip", "zip_code", "zipcode"]:
-                    if col in df.columns:
-                        df = df.rename(columns={col: "zip"})
-                        break
-
-                df.to_csv(out_path, index=False)
-                logger.info(f"Wrote {len(df)} rows for {year}Q{quarter}")
-                time.sleep(delay)
-                return True
-        except Exception as e:
-            logger.debug(f"URL failed: {url} - {e}")
-            continue
-
-    logger.warning(f"Could not fetch vacancy data for {year}Q{quarter}")
-    return False
+def _hud_get(endpoint: str, api_key: str, params: dict = None, timeout: int = 60) -> dict | None:
+    """Make an authenticated GET request to the HUD API."""
+    url = f"{HUD_API_BASE}/{endpoint}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    try:
+        resp = requests.get(url, headers=headers, params=params, timeout=timeout)
+        if resp.status_code == 200:
+            return resp.json()
+        logger.warning(f"HUD API {endpoint}: HTTP {resp.status_code}")
+        return None
+    except Exception as e:
+        logger.warning(f"HUD API {endpoint} failed: {e}")
+        return None
 
 
-def fetch_crosswalk_quarter(year: int, quarter: int, raw_dir: str, delay: float = 0.5) -> bool:
-    """Download zip-to-CBSA crosswalk for a quarter."""
-    out_path = os.path.join(raw_dir, f"hud_cbsa_crosswalk_{year}Q{quarter}.csv")
-    if os.path.exists(out_path):
-        logger.info(f"Skipping {year}Q{quarter} crosswalk, file exists")
-        return True
+def fetch_vacancy_by_cbsa(cbsa_code: str, year: int, quarter: int,
+                          api_key: str, delay: float = 0.5) -> pd.DataFrame:
+    """Fetch vacancy data for a single CBSA via the HUD USPS API."""
+    data = _hud_get("usps", api_key, params={
+        "type": "3",
+        "query": cbsa_code,
+        "year": str(year),
+        "quarter": str(quarter),
+    })
 
-    urls = [
-        f"{HUD_CROSSWALK_BASE}/ZIP_CBSA_{year}Q{quarter}.xlsx",
-        f"{HUD_CROSSWALK_BASE}/ZIP_CBSA_{year}{quarter}.xlsx",
-    ]
+    if not data:
+        return pd.DataFrame()
 
-    for url in urls:
-        try:
-            logger.info(f"Trying crosswalk URL: {url}")
-            resp = requests.get(url, timeout=120)
-            if resp.status_code == 200:
-                df = pd.read_excel(
-                    pd.io.common.BytesIO(resp.content),
-                    dtype=str,
-                )
-                df.columns = df.columns.str.lower().str.replace(" ", "_")
-                df.to_csv(out_path, index=False)
-                logger.info(f"Wrote crosswalk with {len(df)} rows for {year}Q{quarter}")
-                time.sleep(delay)
-                return True
-        except Exception as e:
-            logger.debug(f"Crosswalk URL failed: {url} - {e}")
-            continue
+    records = data if isinstance(data, list) else data.get("data", [])
+    if not records:
+        return pd.DataFrame()
 
-    logger.warning(f"Could not fetch crosswalk for {year}Q{quarter}")
-    return False
+    df = pd.DataFrame(records)
+    df["cbsa_code"] = cbsa_code
+    df["year"] = year
+    df["quarter"] = quarter
+    time.sleep(delay)
+    return df
 
 
 def run(config: dict = None) -> dict:
@@ -105,20 +68,45 @@ def run(config: dict = None) -> dict:
     raw_dir = os.path.join(config["data_paths"]["raw"], "hud_vacancy")
     Path(raw_dir).mkdir(parents=True, exist_ok=True)
 
+    api_key = config["fetch"].get("hud_api_key", "")
     delay = config["fetch"]["request_delay_seconds"]
+    end_year = config["fetch"]["end_year"]
 
+    if not api_key:
+        logger.warning("HUD_API_KEY not set — skipping vacancy fetch")
+        return {
+            "source": "hud_vacancy",
+            "status": "PARTIAL",
+            "files_written": 0,
+            "rows_fetched": 0,
+        }
+
+    cbsa_codes = get_cbsa_codes()
     files_written = 0
     total_rows = 0
 
-    # Fetch from 2015 Q1 to current
-    for year in range(2015, config["fetch"]["end_year"] + 1):
+    for year in range(2015, end_year + 1):
         for quarter in range(1, 5):
-            vac_ok = fetch_vacancy_quarter(year, quarter, raw_dir, delay)
-            xw_ok = fetch_crosswalk_quarter(year, quarter, raw_dir, delay)
-            if vac_ok:
+            out_path = os.path.join(raw_dir, f"hud_vacancy_{year}Q{quarter}.csv")
+            if os.path.exists(out_path):
+                logger.info(f"Skipping {year}Q{quarter} vacancy, file exists")
                 files_written += 1
-            if xw_ok:
+                continue
+
+            all_dfs = []
+            for cbsa in cbsa_codes:
+                df = fetch_vacancy_by_cbsa(cbsa, year, quarter, api_key, delay)
+                if not df.empty:
+                    all_dfs.append(df)
+
+            if all_dfs:
+                combined = pd.concat(all_dfs, ignore_index=True)
+                combined.to_csv(out_path, index=False)
                 files_written += 1
+                total_rows += len(combined)
+                logger.info(f"Wrote {len(combined)} rows for {year}Q{quarter}")
+            else:
+                logger.warning(f"No vacancy data for {year}Q{quarter}")
 
     return {
         "source": "hud_vacancy",

@@ -1,13 +1,13 @@
 name: Fetch & Rebuild Data
 
-# Runs on the 1st of every month at 06:00 UTC, or manually via the Actions UI.
+# Run manually via the Actions UI (scheduled trigger disabled).
 # Fetches all 6 data sources, runs the full pipeline, then commits the
 # processed CSVs and SQLite DB back to the triggering branch.
 # Raw CSV downloads are uploaded as a workflow artifact (90-day retention).
 
 on:
-  schedule:
-    - cron: "0 6 1 * *"   # Monthly: 1st of month at 06:00 UTC
+  # schedule:
+  #   - cron: "0 6 1 * *"   # Monthly: 1st of month at 06:00 UTC
   workflow_dispatch:
     inputs:
       stage:
